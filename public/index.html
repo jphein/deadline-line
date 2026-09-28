@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deadline Line</title>
+<meta name="description" content="Call and ask when your deadline is. AssemblyAI streaming speech-to-text + Deadline Decoder.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <h1><img src="favicon.svg" alt="" width="32" height="32"> Deadline Line</h1>
+  <p class="sub">Say what letter you got and the date on it. You'll hear your real deadline, with the math. <strong>Sample letters only; please don't read real personal information aloud.</strong></p>
+</header>
+<main>
+  <section class="phone" aria-label="Call">
+    <div class="handset" id="handset" data-state="idle" aria-hidden="true">📞</div>
+    <p id="status" role="status">Ready</p>
+    <button id="call" type="button" class="call">Call the line</button>
+    <p id="partial" class="partial" aria-live="off"></p>
+    <form id="typed" class="typed" autocomplete="off">
+      <label for="t" class="visually-hidden">Or type what you'd say</label>
+      <input id="t" placeholder="…or type what you'd say" disabled>
+      <button type="submit" disabled id="send">Say</button>
+    </form>
+    <label class="small"><input type="checkbox" id="neural" checked> Neural voice (same as the phone line)</label>
+  </section>
+  <section class="log" aria-label="Transcript">
+    <ol id="log" aria-live="polite"></ol>
+  </section>
+  <section class="samples" aria-label="Sample letters to read aloud">
+    <h2>Sample letters to read</h2>
+    <ul>
+      <li>"I got a letter from Social Security dated September 13th. They denied my disability again."</li>
+      <li>"My landlord taped a three day notice on my door yesterday."</li>
+      <li>"I was handed eviction papers on the 22nd of September."</li>
+      <li>"The county says my CalFresh is stopping. The notice is dated September 1st."</li>
+    </ul>
+    <p class="small">Every letter here is made up. By phone: see the README for dialing the demo line with a softphone.</p>
+  </section>
+</main>
+<footer class="small muted">Speech-to-text by AssemblyAI Universal-Streaming · deadline rules by the Deadline Decoder MCP server · built by <a href="https://techempower.org">TechEMPOWER</a> · general information, not legal advice</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

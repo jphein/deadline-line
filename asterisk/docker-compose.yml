@@ -1,0 +1,19 @@
+# A throwaway, LOCAL Asterisk for demoing the Deadline Line by phone with a SIP softphone.
+# It is NOT the house PBX: SIP binds to 127.0.0.1:5070 only, there are no trunks, and it can't
+# place or receive PSTN calls. Integrating with a real PBX is a separate, owner-approved step
+# (see docs/PBX-INTEGRATION.md).
+#
+#   ./setup.sh          # once: generates a random softphone password into asterisk/demo-auth.conf
+#   docker compose up   # then dial 3323 ("DEAD") from a softphone registered as "caller"
+services:
+  asterisk:
+    image: andrius/asterisk@sha256:6ef1eb2dd14f34c4b5d226cd05a98aeda000bcaf4ac05f49c6c199a09249f8b7   # Asterisk 22.10.1 (pinned by digest)
+    container_name: deadline-line-asterisk
+    network_mode: host          # SIP is bound to 127.0.0.1 in pjsip.conf, so this stays on loopback
+    volumes:
+      - ./pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./demo-auth.conf:/etc/asterisk/demo-auth.conf:ro
+      - ./extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./modules.conf:/etc/asterisk/modules.conf:ro
+    restart: "no"

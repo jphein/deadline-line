@@ -1,0 +1,15 @@
+# Replit: import this repo, add the Secret ASSEMBLYAI_API_KEY, press Run.
+# Web demo only (no phone line here). With no Piper or espeak-ng, the browser's own voice speaks.
+modules = ["nodejs-20"]
+run = "npm install && npm start"
+
+[env]
+HOST = "0.0.0.0"
+PORT = "8770"
+
+[[ports]]
+localPort = 8770
+externalPort = 80
+
+[deployment]
+run = ["sh", "-c", "npm install && npm start"]
