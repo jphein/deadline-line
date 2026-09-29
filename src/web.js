@@ -8,7 +8,7 @@ import { WebSocketServer } from "ws";
 import { AaiStream, KEYTERMS } from "./aai.js";
 import { Dialog, GREETING } from "./dialog.js";
 import { synth } from "./tts.js";
-import { demoLimits, clientIp, MESSAGES } from "./limits.js";
+import { demoLimits, clientIp, speechSeconds, MESSAGES } from "./limits.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,48 +34,63 @@ export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate
   });
 
   const attach = (server) => {
-    const wss = new WebSocketServer({ server, path: "/listen" });
+    // maxPayload: the page sends small audio frames; a huge one is refused (and raises "error", handled below).
+    const wss = new WebSocketServer({ server, path: "/listen", maxPayload: limits.cfg.maxFrameBytes });
+    wss.on("error", (e) => console.warn(`listen: ${e.message}`));
     wss.on("connection", (ws, req) => {
+      // A malformed or oversized frame raises "error" on the socket. Unhandled, it would crash the server.
+      ws.on("error", (e) => { console.warn(`listen: ${e.message}`); stop(); ws.terminate(); });
       const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
-      // Guardrails first: every admitted conversation streams audio on a billed key.
+      // Guardrails first: every admitted conversation holds an AssemblyAI session on a billed key.
       const admitted = limits.admit(clientIp(req));
-      if (!admitted.ok) { send({ type: "line", text: MESSAGES[admitted.reason], done: true }); return ws.close(); }
-      let recognizer, busy = false, stopped = false, ended = false, cap, idle;
-      const stop = () => {          // stop the billing, once: close the recognizer and free the slot
+      let recognizer, busy = false, stopped = !admitted.ok, ended = false, cap, idle, streamed = 0;
+      function stop() {             // end the billing, once: close the recognizer and free the slot
         if (stopped) return;
-        stopped = true; clearTimeout(cap); clearTimeout(idle); limits.release(); recognizer?.close();
-      };
+        stopped = true; clearTimeout(cap); clearTimeout(idle); limits.release(admitted.ticket); recognizer?.close();
+      }
+      if (!admitted.ok) { send({ type: "line", text: MESSAGES[admitted.reason], done: true }); return ws.close(); }
       const end = (text) => {       // the demo ends the call itself; a client that never answers the close is cut off
         if (ended) return;
         ended = true; stop(); send({ type: "line", text, done: true }); ws.close();
         setTimeout(() => { if (ws.readyState !== 3) ws.terminate(); }, 2000).unref?.();
       };
       cap = setTimeout(() => end(MESSAGES.sessionEnd), limits.cfg.sessionMaxS * 1000);
-      const poke = () => { clearTimeout(idle); idle = setTimeout(() => end(MESSAGES.idle), limits.cfg.idleS * 1000); };
-      poke();
+      // Idle means no one is talking: no speech heard, nothing typed, and the line not speaking. Silent audio
+      // frames don't count, so an abandoned tab with an open mic hangs up too.
+      const poke = (extraS = 0) => {
+        if (ended) return;
+        clearTimeout(idle); idle = setTimeout(() => end(MESSAGES.idle), (limits.cfg.idleS + extraS) * 1000);
+      };
+      const say = (o) => { send(o); if (o.type === "line" && !o.done) poke(speechSeconds(o.text, limits.cfg.speechWps)); };
       const dialog = new Dialog(callTool, { today });
       try { recognizer = stt(16000); }
       catch (e) { stop(); send({ type: "error", text: e.message }); return ws.close(); }
-      send({ type: "line", text: GREETING });
+      say({ type: "line", text: GREETING });
       recognizer.on("turn", async ({ text, final }) => {
+        if (ended) return;
+        poke();
         if (!final) return send({ type: "partial", text });
         if (busy) return;
         busy = true; send({ type: "caller", text });
-        try { const r = await dialog.handle(text); send({ type: "line", text: r.say, done: r.done }); }
+        try { const r = await dialog.handle(text); say({ type: "line", text: r.say, done: r.done }); }
         catch (e) { send({ type: "error", text: e.message }); }
         finally { busy = false; }
       });
       recognizer.on("error", (e) => send({ type: "error", text: `speech-to-text: ${e.message}` }));
       ws.on("message", (data, isBinary) => {
         if (ended) return;
-        poke();
         if (isBinary) {
+          // Pace audio to real time: anything beyond (elapsed + burst) is dropped, not forwarded.
           const pcm = Buffer.from(data);
-          if (!limits.addAudio(pcm.length, 16000)) return end(MESSAGES.budget);
+          if (streamed + pcm.length > limits.audioAllowance(admitted.ticket, 16000)) return;
+          streamed += pcm.length;
           return recognizer.send(pcm);
         }
         // Typed fallback, for demos without a microphone.
-        try { const m = JSON.parse(data.toString()); if (m.type === "text") recognizer.emit("turn", { text: m.text, final: true }); } catch {}
+        try {
+          const m = JSON.parse(data.toString());
+          if (m.type === "text") { poke(); recognizer.emit("turn", { text: String(m.text).slice(0, 500), final: true }); }
+        } catch {}
       });
       ws.on("close", stop);
     });
