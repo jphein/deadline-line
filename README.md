@@ -34,6 +34,20 @@ Rehearse without an AssemblyAI key: `node tests/fake-aai-server.mjs` and start t
 
 Connecting a real PBX is deliberately out of scope for the demo: see [docs/PBX-INTEGRATION.md](docs/PBX-INTEGRATION.md).
 
+## Running it as a public demo
+Every conversation streams audio to AssemblyAI on your key, so the web demo limits itself. Each limit is an environment variable:
+
+| Variable | Default | What it limits |
+|---|---|---|
+| `DEMO_SESSION_MAX_S` | 180 | seconds in one conversation; then the line says goodbye and hangs up |
+| `DEMO_IDLE_S` | 45 | seconds with no audio or text before the line hangs up |
+| `DEMO_MAX_CONCURRENT` | 4 | conversations at once; the next visitor hears "the demo line is busy" |
+| `DEMO_SESSIONS_PER_IP_HOUR` | 12 | new conversations per visitor per hour |
+| `DEMO_DAILY_AUDIO_S` | 7200 | seconds of streamed audio per UTC day, across all visitors |
+| `DEMO_TTS_PER_IP_MIN` | 30 | `/tts` requests per visitor per minute |
+
+Behind a reverse proxy, set `TRUST_PROXY=1` so the per-visitor limits use the first `X-Forwarded-For` address, and keep `HOST=127.0.0.1` so only the proxy can reach the server. The global limits (at once, per day) bound the spend even if a visitor forges that header.
+
 ## Privacy
 Sample letters only in demos. The bridge keeps each call's transcript in memory for the call's duration and writes nothing to disk. Audio goes to AssemblyAI for transcription and nowhere else.
 

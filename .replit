@@ -6,6 +6,7 @@ run = "npm install && npm start"
 [env]
 HOST = "0.0.0.0"
 PORT = "8770"
+TRUST_PROXY = "1"
 
 [[ports]]
 localPort = 8770

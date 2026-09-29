@@ -8,6 +8,7 @@ import { WebSocketServer } from "ws";
 import { AaiStream, KEYTERMS } from "./aai.js";
 import { Dialog, GREETING } from "./dialog.js";
 import { synth } from "./tts.js";
+import { demoLimits, clientIp, MESSAGES } from "./limits.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,11 +20,13 @@ function wav(pcm, rate) {
   return Buffer.concat([h, pcm]);
 }
 
-export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate: rate, keyterms: KEYTERMS }), tts = synth, today } = {}) {
+export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate: rate, keyterms: KEYTERMS }), tts = synth, today,
+                            limits = demoLimits() } = {}) {
   const app = express();
   app.use(express.static(path.join(here, "..", "public")));
   app.get("/healthz", (_q, r) => r.json({ ok: true, stt: process.env.ASSEMBLYAI_API_KEY ? "assemblyai" : "missing key", tts: process.env.TTS_WYOMING || "espeak-ng" }));
   app.get("/tts", async (req, res) => {
+    if (!limits.ttsAllowed(clientIp(req))) return res.status(429).json({ error: "too many requests" });
     const text = String(req.query.text || "").slice(0, 1200);
     if (!text) return res.status(400).end();
     try { res.type("audio/wav").send(wav(await tts(text, 22050), 22050)); }
@@ -32,12 +35,27 @@ export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate
 
   const attach = (server) => {
     const wss = new WebSocketServer({ server, path: "/listen" });
-    wss.on("connection", (ws) => {
-      const dialog = new Dialog(callTool, { today });
-      let recognizer, busy = false;
+    wss.on("connection", (ws, req) => {
       const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
+      // Guardrails first: every admitted conversation streams audio on a billed key.
+      const admitted = limits.admit(clientIp(req));
+      if (!admitted.ok) { send({ type: "line", text: MESSAGES[admitted.reason], done: true }); return ws.close(); }
+      let recognizer, busy = false, stopped = false, ended = false, cap, idle;
+      const stop = () => {          // stop the billing, once: close the recognizer and free the slot
+        if (stopped) return;
+        stopped = true; clearTimeout(cap); clearTimeout(idle); limits.release(); recognizer?.close();
+      };
+      const end = (text) => {       // the demo ends the call itself; a client that never answers the close is cut off
+        if (ended) return;
+        ended = true; stop(); send({ type: "line", text, done: true }); ws.close();
+        setTimeout(() => { if (ws.readyState !== 3) ws.terminate(); }, 2000).unref?.();
+      };
+      cap = setTimeout(() => end(MESSAGES.sessionEnd), limits.cfg.sessionMaxS * 1000);
+      const poke = () => { clearTimeout(idle); idle = setTimeout(() => end(MESSAGES.idle), limits.cfg.idleS * 1000); };
+      poke();
+      const dialog = new Dialog(callTool, { today });
       try { recognizer = stt(16000); }
-      catch (e) { send({ type: "error", text: e.message }); return ws.close(); }
+      catch (e) { stop(); send({ type: "error", text: e.message }); return ws.close(); }
       send({ type: "line", text: GREETING });
       recognizer.on("turn", async ({ text, final }) => {
         if (!final) return send({ type: "partial", text });
@@ -49,11 +67,17 @@ export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate
       });
       recognizer.on("error", (e) => send({ type: "error", text: `speech-to-text: ${e.message}` }));
       ws.on("message", (data, isBinary) => {
-        if (isBinary) return recognizer.send(Buffer.from(data));
+        if (ended) return;
+        poke();
+        if (isBinary) {
+          const pcm = Buffer.from(data);
+          if (!limits.addAudio(pcm.length, 16000)) return end(MESSAGES.budget);
+          return recognizer.send(pcm);
+        }
         // Typed fallback, for demos without a microphone.
         try { const m = JSON.parse(data.toString()); if (m.type === "text") recognizer.emit("turn", { text: m.text, final: true }); } catch {}
       });
-      ws.on("close", () => recognizer.close());
+      ws.on("close", stop);
     });
     return wss;
   };
