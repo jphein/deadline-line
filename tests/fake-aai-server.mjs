@@ -14,6 +14,13 @@ wss.on("connection", (ws, req) => {
   ws.send(JSON.stringify({ type: "Begin", id: "fake" }));
   ws.on("message", (d, bin) => {
     if (!bin) { if (JSON.parse(d).type === "Terminate") ws.send(JSON.stringify({ type: "Termination" })); return; }
+    // the real service takes 50 to 1000 ms per message and ends the session otherwise; so does this stand-in
+    const ms = (d.length / (rate * 2)) * 1000;
+    if (ms < 50 || ms > 1000) {
+      ws.send(JSON.stringify({ error: `Input Duration Error: Input Duration Violation: ${ms.toFixed(1)} ms. Expected between 50 and 1000 ms` }));
+      ws.close(3007, "Input duration violation");
+      return;
+    }
     bytes += d.length;
     const secs = bytes / (rate * 2);
     // one scripted turn every ~14 s of caller audio (leaves room for the line's answer to play)

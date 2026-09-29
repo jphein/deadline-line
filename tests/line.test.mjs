@@ -13,9 +13,9 @@ import { startMcp, startFakeAai, fakeStt, fakeTts, TODAY } from "./helpers.mjs";
 test("AssemblyAI client: auth header, params, buffered audio, final turns only", async () => {
   const aai = await startFakeAai();
   const s = new AaiStream({ apiKey: "test-key", sampleRate: 8000, url: aai.url, keyterms: ["Medi-Cal"] });
-  s.send(Buffer.alloc(320));                         // sent before Begin: must be buffered, not lost
+  for (let i = 0; i < 5; i++) s.send(Buffer.alloc(320));   // 20 ms frames sent before Begin: buffered, not lost
   await new Promise(r => s.once("open", r));
-  s.send(Buffer.alloc(320));
+  for (let i = 0; i < 5; i++) s.send(Buffer.alloc(320));
   const turns = [];
   s.on("turn", t => turns.push(t));
   await new Promise(r => setTimeout(r, 50));
@@ -24,11 +24,61 @@ test("AssemblyAI client: auth header, params, buffered audio, final turns only",
   await new Promise(r => setTimeout(r, 50));
   assert.equal(aai.state.auth, "test-key");
   assert.match(aai.state.url, /sample_rate=8000/); assert.match(aai.state.url, /encoding=pcm_s16le/); assert.match(aai.state.url, /keyterms_prompt=/);
-  assert.equal(aai.state.bytes, 640);
+  // the 5 frames held until Begin go out as one 100 ms message, then every 3 frames as 60 ms; 40 ms waits
+  assert.deepEqual(aai.state.chunksMs, [100, 60]);
+  assert.equal(aai.state.violations, 0);
   assert.deepEqual(turns.map(t => t.final), [false, true]);
   s.close(); await new Promise(r => setTimeout(r, 100));
+  assert.deepEqual(aai.state.chunksMs, [100, 60, 50]); // the 40 ms rest, padded to 50 ms, before Terminate
+  assert.equal(aai.state.bytes, 3360);                  // all 3200 bytes of audio, plus 160 bytes of padding
   assert.equal(aai.state.terminated, true);
   await aai.close();
+});
+
+test("AssemblyAI client: 20 ms phone frames go out as 50 to 1000 ms messages", async () => {
+  const aai = await startFakeAai();
+  const s = new AaiStream({ apiKey: "test-key", sampleRate: 8000, url: aai.url });
+  await new Promise(r => s.once("open", r));
+  const errors = []; s.on("error", e => errors.push(e.message));
+  for (let i = 0; i < 50; i++) s.send(Buffer.alloc(320));   // one second of AudioSocket frames
+  await new Promise(r => setTimeout(r, 50));
+  s.close(); await new Promise(r => setTimeout(r, 100));
+  assert.equal(aai.state.violations, 0, `chunk lengths (ms): ${aai.state.chunksMs.join(", ")}`);
+  assert.ok(aai.state.chunksMs.every(ms => ms >= 50 && ms <= 1000));
+  assert.ok(aai.state.bytes >= 16000);                  // nothing lost: 1 s of audio, plus any padding at close
+  assert.deepEqual(errors, []);
+  assert.equal(aai.state.terminated, true);
+  await aai.close();
+});
+
+test("AssemblyAI client: a long burst is split into 1000 ms pieces", async () => {
+  const aai = await startFakeAai();
+  const s = new AaiStream({ apiKey: "test-key", sampleRate: 16000, url: aai.url });
+  await new Promise(r => s.once("open", r));
+  s.send(Buffer.alloc(80000));                          // 2.5 s at 16 kHz in one message
+  await new Promise(r => setTimeout(r, 50));
+  assert.deepEqual(aai.state.chunksMs, [1000, 1000, 500]);
+  assert.equal(aai.state.violations, 0);
+  s.close(); await new Promise(r => setTimeout(r, 100));
+  await aai.close();
+});
+
+test("AssemblyAI client: the last scrap of audio is padded to 50 ms at close", async () => {
+  const aai = await startFakeAai();
+  const s = new AaiStream({ apiKey: "test-key", sampleRate: 8000, url: aai.url });
+  await new Promise(r => s.once("open", r));
+  s.send(Buffer.alloc(480));                            // 30 ms: too short to send on its own
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(aai.state.bytes, 0);                     // held back
+  s.close(); await new Promise(r => setTimeout(r, 100));
+  assert.deepEqual(aai.state.chunksMs, [50]);           // padded with silence, sent before Terminate
+  assert.equal(aai.state.violations, 0);
+  assert.equal(aai.state.terminated, true);
+  await aai.close();
+});
+
+test("AssemblyAI client refuses a missing sample rate", () => {
+  assert.throws(() => new AaiStream({ apiKey: "test-key", url: "ws://127.0.0.1:9/v3/ws" }), /sampleRate/);
 });
 
 test("AssemblyAI client refuses to run against the real endpoint without a key", () => {
