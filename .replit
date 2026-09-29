@@ -7,6 +7,10 @@ run = "npm install && npm start"
 HOST = "0.0.0.0"
 PORT = "8770"
 TRUST_PROXY = "1"
+# Replit's proxy hop count is unverified: if every visitor looks like one address, generous per-visitor limits keep
+# judges from locking each other out. The global limits (4 at once, 2 h a day) still bound the spend.
+DEMO_MAX_PER_IP = "4"
+DEMO_SESSIONS_PER_IP_HOUR = "60"
 
 [[ports]]
 localPort = 8770

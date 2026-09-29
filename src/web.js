@@ -33,16 +33,21 @@ export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  let loggedHops = false;
   const attach = (server) => {
     // maxPayload: the page sends small audio frames; a huge one is refused (and raises "error", handled below).
     const wss = new WebSocketServer({ server, path: "/listen", maxPayload: limits.cfg.maxFrameBytes });
-    wss.on("error", (e) => console.warn(`listen: ${e.message}`));
     wss.on("connection", (ws, req) => {
       // A malformed or oversized frame raises "error" on the socket. Unhandled, it would crash the server.
       ws.on("error", (e) => { console.warn(`listen: ${e.message}`); stop(); ws.terminate(); });
       const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
       // Guardrails first: every admitted conversation holds an AssemblyAI session on a billed key.
       const admitted = limits.admit(clientIp(req));
+      if (!loggedHops) {             // once, so a deploy can check TRUST_PROXY against its proxy: a count, no addresses
+        loggedHops = true;
+        const n = String(req.headers["x-forwarded-for"] || "").split(",").filter(s => s.trim()).length;
+        console.log(`listen: first call; X-Forwarded-For has ${n} hop(s); TRUST_PROXY=${process.env.TRUST_PROXY || "0"}`);
+      }
       let recognizer, busy = false, stopped = !admitted.ok, ended = false, cap, idle, streamed = 0;
       function stop() {             // end the billing, once: close the recognizer and free the slot
         if (stopped) return;
@@ -67,7 +72,7 @@ export function createWeb({ callTool, stt = (rate) => new AaiStream({ sampleRate
       catch (e) { stop(); send({ type: "error", text: e.message }); return ws.close(); }
       say({ type: "line", text: GREETING });
       recognizer.on("turn", async ({ text, final }) => {
-        if (ended) return;
+        if (ended || stopped) return;     // a transcript that lands after hang-up is dropped
         poke();
         if (!final) return send({ type: "partial", text });
         if (busy) return;

@@ -109,7 +109,7 @@ test("web: a conversation ends itself at the session cap, even while the caller 
   try {
     const c = await w.open();
     const talk = setInterval(() => c.ws.readyState === 1 && c.ws.send(JSON.stringify({ type: "text", text: "hello" })), 100);
-    await c.closed; clearInterval(talk);
+    try { await c.closed; } finally { clearInterval(talk); }
     const last = c.msgs.at(-1);
     assert.equal(last.text, MESSAGES.sessionEnd); assert.equal(last.done, true);
     assert.equal(w.stts[0].closed, true);
@@ -121,7 +121,7 @@ test("web: silence ends a conversation at the idle limit, and silent audio frame
   try {
     const c = await w.open();
     const frames = setInterval(() => c.ws.readyState === 1 && c.ws.send(Buffer.alloc(640)), 20);   // an open mic, nobody talking
-    await c.closed; clearInterval(frames);
+    try { await c.closed; } finally { clearInterval(frames); }
     assert.equal(c.msgs.at(-1).text, MESSAGES.idle);
   } finally { await w.close(); }
 });
