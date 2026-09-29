@@ -64,6 +64,18 @@ test("dialog: letter first, then the date", async () => {
   } finally { await mcp.close(); }
 });
 
+test("dialog: something that isn't a date, while waiting for one, re-asks without naming a letter", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    assert.match((await d.handle("I got eviction papers.")).say, /^Got it: .*unlawful detainer.*What date is on it\?/);
+    const r = await d.handle("What do you mean?");
+    assert.doesNotMatch(r.say, /null|undefined/);
+    assert.match(r.say, /^I still need the date on the letter\. What date is on it\?/);
+    assert.match((await d.handle("They were handed to me on the 22nd of September.")).say, /Wednesday, October 7, 2026/);
+  } finally { await mcp.close(); }
+});
+
 test("dialog: unknown letter asks which kind; repeat works", async () => {
   const mcp = await startMcp();
   try {

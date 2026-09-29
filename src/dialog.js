@@ -46,7 +46,9 @@ export class Dialog {
     if (this.letter && this.date) return this.answer();
     if (this.letter) {
       this.awaiting = "date";
-      return this.say(`Got it: ${det.letter_title}. What date is on it? You can say something like September 13th.`);
+      const ask = "What date is on it? You can say something like September 13th.";
+      // Name the letter only when this turn is what identified it; otherwise just ask for the date again.
+      return this.say(det.recognized && det.letter_title ? `Got it: ${det.letter_title}. ${ask}` : `I still need the date on the letter. ${ask}`);
     }
     this.awaiting = "letter";
     return this.say(this.date

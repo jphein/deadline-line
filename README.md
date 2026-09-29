@@ -34,6 +34,23 @@ Rehearse without an AssemblyAI key: `node tests/fake-aai-server.mjs` and start t
 
 Connecting a real PBX is deliberately out of scope for the demo: see [docs/PBX-INTEGRATION.md](docs/PBX-INTEGRATION.md).
 
+## Running it as a public demo
+Every conversation holds an AssemblyAI streaming session on your key, so the web demo limits itself. Each limit is an environment variable:
+
+| Variable | Default | What it limits |
+|---|---|---|
+| `DEMO_SESSION_MAX_S` | 180 | seconds in one conversation; then the line says goodbye and hangs up |
+| `DEMO_IDLE_S` | 45 | seconds with no speech, typing or reply before the line hangs up (silent mic audio doesn't count) |
+| `DEMO_MAX_CONCURRENT` | 4 | conversations at once; the next visitor hears "the demo line is busy" |
+| `DEMO_MAX_PER_IP` | 2 | conversations at once from one visitor |
+| `DEMO_SESSIONS_PER_IP_HOUR` | 12 | new conversations per visitor per hour |
+| `DEMO_DAILY_S` | 7200 | session time per UTC day, across all visitors |
+| `DEMO_TTS_PER_IP_MIN` | 30 | `/tts` requests per visitor per minute |
+| `DEMO_PACE_BURST_S` | 2 | how far audio may run ahead of real time; the rest is dropped |
+| `DEMO_MAX_FRAME_BYTES` | 65536 | the largest WebSocket frame accepted |
+
+Behind reverse proxies, set `TRUST_PROXY` to how many there are (usually `1`), so the per-visitor limits use that many `X-Forwarded-For` hops from the right, and keep `HOST=127.0.0.1` so only the proxy can reach the server. The global limits (at once, per day) bound the spend even if a visitor forges that header.
+
 ## Privacy
 Sample letters only in demos. The bridge keeps each call's transcript in memory for the call's duration and writes nothing to disk. Audio goes to AssemblyAI for transcription and nowhere else.
 
