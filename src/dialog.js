@@ -78,7 +78,8 @@ export class Dialog {
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
-    if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
+    // A different letter than the one we were on: an earlier HOA mention was about that one, not this.
+    if (det.recognized && det.letter_type !== this.letter) { if (this.letter) this.hoa = false; this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
     if (HOA.test(t)) this.hoa = true;   // "my HOA sent me a letter" → "what kind?" → "a notice of default"

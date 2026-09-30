@@ -388,6 +388,14 @@ test("dialog: a caller who says HOA hears the § 5715 redemption right; a plain 
     assert.equal(two.letter, "ca-foreclosure-nod");
     assert.equal(second.say.split(STEP).length, 2, "two turns: said once");
     assert.equal(two.snapshot().hoa, false, "cleared once said");
+    // Two letters in one call: the HOA mention belongs to the first, so the second (a deed of trust) has no HOA text.
+    const both = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await both.handle("my HOA is suing me in small claims");
+    await both.handle("yes");
+    assert.ok(!(await both.handle("I got a notice of default on my house")).say.includes("homeowners association"), "after another answered letter");
+    const sw = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await sw.handle("my HOA sent me a rent increase notice");
+    assert.ok(!(await sw.handle("no, it's a notice of default on my house")).say.includes("homeowners association"), "after switching letters");
     for (const x of ["I got a notice of default on my house", "I got a notice of trustee's sale"]) {
       const [, a] = await say(x);
       assert.ok(!a.say.includes("homeowners association"), x);
