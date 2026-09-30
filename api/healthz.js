@@ -1,4 +1,4 @@
-// GET /api/healthz: {ok, stt, mode: "vercel"}. The page reads mode to call AssemblyAI directly. See src/vercel.js.
-import { healthHandler } from "../src/vercel.js";
+// GET /api/healthz on Vercel: {ok, stt, mode: "direct", platform: "vercel"}. See src/handlers.js.
+import { apiRoutes } from "../src/handlers.js";
 
-export const GET = healthHandler();
+export const { GET } = apiRoutes(process.env, "vercel")["/api/healthz"];

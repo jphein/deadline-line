@@ -1,12 +1,12 @@
 const $ = (id) => document.getElementById(id);
 let ws = null, ctx = null, stream = null, node = null, playing = Promise.resolve(), mutedUntil = 0;
 // Two ways to place a call. "server": this page's own server holds the call (src/web.js, over /listen).
-// "direct": the Vercel demo (src/vercel.js). No server there can hold a WebSocket, so the page streams to
-// AssemblyAI itself with a temporary token and asks /api/decode for each reply.
+// "direct": the serverless demo on Cloudflare Workers or Vercel (src/handlers.js). No server there can hold a
+// WebSocket, so the page streams to AssemblyAI itself with a temporary token and asks /api/decode for each reply.
 let mode = "server", direct = null;
 const inCall = () => Boolean(ws || direct);
 const detected = fetch("api/healthz").then(r => (r.ok ? r.json() : null)).then((h) => {
-  if (h?.mode !== "vercel") return;
+  if (h?.mode !== "direct") return;
   mode = "direct";
   $("neural").checked = false; $("neural").closest("label").hidden = true;   // no neural voice there: the browser speaks
 }).catch(() => {});
@@ -90,7 +90,7 @@ async function openMic() {
 }
 function closeMic(m) { m.s.getTracks().forEach(t => t.stop()); m.c.close(); }
 // Idle means no speech heard, nothing typed and the line not speaking. It only runs while AssemblyAI is
-// listening: a typed-only call opens no speech-to-text session, so leaving it open costs nothing.
+// listening: a call without the microphone (denied, or none) opens no speech-to-text session, so it costs nothing.
 function poke(call, extraS = 0) {
   if (!call.limits || call.over) return;
   clearTimeout(call.idle);

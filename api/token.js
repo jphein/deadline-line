@@ -1,4 +1,4 @@
-// GET /api/token: a temporary AssemblyAI streaming token for one browser call. See src/vercel.js.
-import { tokenHandler } from "../src/vercel.js";
+// GET /api/token on Vercel: a temporary AssemblyAI streaming token for one browser call. See src/handlers.js.
+import { apiRoutes } from "../src/handlers.js";
 
-export const GET = tokenHandler();
+export const { GET } = apiRoutes(process.env, "vercel")["/api/token"];

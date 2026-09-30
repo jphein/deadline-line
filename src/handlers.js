@@ -1,11 +1,12 @@
-// vercel.js — the browser demo on short-lived functions (Vercel's free Hobby plan), behind api/*.js.
-// A function can't hold the audio WebSocket open for a whole call, so the page streams its mic straight to
-// AssemblyAI with a temporary token from /api/token (the API key never leaves the function), and posts each
-// final transcript to /api/decode, which runs the same Dialog over the same vendored rules, in-process.
+// handlers.js — the browser demo's serverless side, as Web-standard handlers (Request in, Response out; the
+// platform's env passed in; no Node imports), shared by the Cloudflare Workers adapter (worker.js) and the
+// Vercel one (api/*.js). A function can't hold the audio WebSocket open for a whole call, so the page streams
+// its mic straight to AssemblyAI with a temporary token from /api/token (the API key never leaves the function),
+// and posts each final transcript to /api/decode, which runs the same Dialog over the same vendored rules.
 // The conversation's state rides along with each request, so the functions remember nothing between turns.
 // The phone line and the full web demo (neural voice, server-side limits) still run on src/server.js.
 import { Dialog, GREETING } from "./dialog.js";
-import { AAI_URL, KEYTERMS, streamingQuery } from "./aai.js";
+import { AAI_WS_URL, KEYTERMS, streamingQuery } from "./streaming.js";
 import { demoConfig, tokenLimits, MESSAGES } from "./limits.js";
 import { detectLetter, computeDeadline, listLetterTypes, todayIso, DecoderError } from "../vendor/deadline-decoder-mcp/src/decoder.js";
 
@@ -17,10 +18,13 @@ const MAX_BODY = 16 * 1024, MAX_TRANSCRIPT = 2000, MAX_LAST = 2000;
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
-/** The visitor's address. Vercel's edge sets x-real-ip and overwrites any x-forwarded-for a client sends. */
-export function vercelClientIp(headers) {
-  return headers.get("x-real-ip") || String(headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
-}
+/** The visitor's address, from the header each platform sets itself and a client can't forge there.
+ *  Cloudflare sets cf-connecting-ip (x-real-ip is whatever the client sent); Vercel's edge sets x-real-ip and
+ *  overwrites x-forwarded-for. */
+export const CLIENT_IP = {
+  "cloudflare-workers": (headers) => headers.get("cf-connecting-ip") || "unknown",
+  vercel: (headers) => headers.get("x-real-ip") || String(headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown",
+};
 
 /** The Deadline Decoder tools, called in-process: the functions the MCP server wraps, with its default date
  *  (today in California), returning what the MCP client returns (the structured result, as plain JSON). */
@@ -76,14 +80,14 @@ export function decodeHandlers({ callTool = localCallTool() } = {}) {
 
 /** /api/token. GET: a temporary AssemblyAI streaming token for one call, as the ready-to-open WebSocket URL
  *  (16 kHz PCM16, the same key terms as the server). The session is capped at DEMO_SESSION_MAX_S by AssemblyAI;
- *  tokens per visitor and per day are capped here (see tokenLimits). */
-export function tokenHandler({ env = process.env, fetch: fetchImpl, limits = tokenLimits(demoConfig(env)) } = {}) {
+ *  tokens per visitor and per day are capped here (see tokenLimits), per function instance. */
+export function tokenHandler({ env, fetch: fetchImpl, limits = tokenLimits(demoConfig(env)), ip = CLIENT_IP.vercel }) {
   const get = fetchImpl ?? ((...a) => globalThis.fetch(...a));
   const sessionMaxS = Math.min(10800, Math.max(60, Math.round(limits.cfg.sessionMaxS)));   // AssemblyAI's range
   return async function GET(request) {
     const key = env.ASSEMBLYAI_API_KEY;
     if (!key) return json({ error: "Speech-to-text isn't set up here (ASSEMBLYAI_API_KEY is missing). You can type instead." }, 503);
-    const verdict = limits.allow(vercelClientIp(request.headers));
+    const verdict = limits.allow(ip(request.headers));
     if (!verdict.ok) return json({ error: MESSAGES[verdict.reason] }, 429);
     const url = new URL(TOKEN_URL);
     url.searchParams.set("expires_in_seconds", String(TOKEN_TTL_S));
@@ -97,20 +101,45 @@ export function tokenHandler({ env = process.env, fetch: fetchImpl, limits = tok
       }
       ({ token } = await r.json());
     } catch (e) {
-      console.warn(`token: ${e.name}: ${e.message}`);
+      // Never e.message: for a malformed key (a stray newline, say) fetch's TypeError quotes the header value.
+      console.warn(`token: couldn't reach AssemblyAI: ${e.name}${e.cause?.code ? ` (${e.cause.code})` : ""}`);
       return json({ error: "Couldn't reach AssemblyAI. You can type instead." }, 502);
     }
     if (typeof token !== "string" || !token) return json({ error: "AssemblyAI sent no token. You can type instead." }, 502);
     const q = streamingQuery(SAMPLE_RATE, KEYTERMS);
     q.set("token", token);
     return json({
-      url: `${AAI_URL}?${q}`, expires_in_seconds: TOKEN_TTL_S, session_max_s: sessionMaxS, idle_s: limits.cfg.idleS,
-      messages: { idle: MESSAGES.idle, sessionEnd: MESSAGES.sessionEnd },
+      url: `${env.AAI_STREAMING_URL || AAI_WS_URL}?${q}`, expires_in_seconds: TOKEN_TTL_S, session_max_s: sessionMaxS,
+      idle_s: limits.cfg.idleS, messages: { idle: MESSAGES.idle, sessionEnd: MESSAGES.sessionEnd },
     });
   };
 }
 
-/** /api/healthz. The page reads mode to decide how to place a call. */
-export function healthHandler(env = process.env) {
-  return () => json({ ok: true, stt: env.ASSEMBLYAI_API_KEY ? "assemblyai" : "missing key", mode: "vercel" });
+/** /api/healthz. The page reads mode ("direct": call AssemblyAI itself); platform says which adapter answered. */
+export function healthHandler(env, platform) {
+  return () => json({ ok: true, stt: env.ASSEMBLYAI_API_KEY ? "assemblyai" : "missing key", mode: "direct", platform });
+}
+
+/** The three endpoints on one platform: { "/api/token": { GET }, ... }. Both adapters build them here. */
+export function apiRoutes(env, platform) {
+  if (!CLIENT_IP[platform]) throw new Error(`unknown platform: ${platform}`);
+  return {
+    "/api/token": { GET: tokenHandler({ env, ip: CLIENT_IP[platform] }) },
+    "/api/decode": decodeHandlers(),
+    "/api/healthz": { GET: healthHandler(env, platform) },
+  };
+}
+
+/** A fetch(request, env) for a host that sends every request through one function (Cloudflare Workers): the
+ *  API routes, else the static files (env.ASSETS). Routes are built on the first request, because that's when the
+ *  env arrives, and then kept, so the token limits live as long as the isolate. */
+export function router(build) {
+  let routes = null;
+  return async function fetch(request, env) {
+    routes ??= build(env);
+    const route = routes[new URL(request.url).pathname];
+    if (!route) return env.ASSETS.fetch(request);
+    const handler = route[request.method];
+    return handler ? handler(request) : new Response(null, { status: 405, headers: { allow: Object.keys(route).join(", ") } });
+  };
 }
