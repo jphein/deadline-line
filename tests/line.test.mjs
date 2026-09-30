@@ -435,3 +435,14 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
     assert.equal(after.letter, "ca-foreclosure-nod");
   } finally { await mcp.close(); }
 });
+
+test("dialog: restore() takes the HOA flag only as a real true (a tampered snapshot doesn't bring the step)", async () => {
+  const mcp = await startMcp();
+  try {
+    const times = (a) => (a.say.match(/If your homeowners association is foreclosing/g) || []).length;
+    for (const [hoa, want] of [["yes", 0], [1, 0], [{}, 0], ["true", 0], [true, 1]]) {
+      const d = await Dialog.restore(mcp.callTool, { letter: null, awaiting: "letter", hoa }, { today: "2026-09-30" });
+      assert.equal(times(await d.handle("a notice of default")), want, JSON.stringify(hoa));
+    }
+  } finally { await mcp.close(); }
+});
