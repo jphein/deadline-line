@@ -3,22 +3,16 @@
 // Docs: https://www.assemblyai.com/docs/speech-to-text/universal-streaming
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
+import { AAI_WS_URL, KEYTERMS, streamingQuery } from "./streaming.js";
 
-export const AAI_URL = process.env.AAI_STREAMING_URL || "wss://streaming.assemblyai.com/v3/ws";
+export { KEYTERMS, streamingQuery };
+export const AAI_URL = process.env.AAI_STREAMING_URL || AAI_WS_URL;
 
 // Universal-Streaming takes 50 to 1000 ms of audio per message and ends the session on anything else
 // ("Input Duration Violation"). Asterisk's AudioSocket delivers 20 ms frames, so audio is gathered until
 // there is at least 50 ms, a longer burst is split into 1000 ms pieces, and the last scrap is padded with
 // silence at close. The browser already posts 50 ms chunks, so those go straight through.
 export const CHUNK_MS = { min: 50, max: 1000 };
-
-/** The query for one streaming session: raw PCM16, formatted turns, key terms. The server's sessions and the
- *  page's direct sessions on Vercel (src/vercel.js) both open with it. */
-export function streamingQuery(sampleRate, keyterms = []) {
-  const q = new URLSearchParams({ sample_rate: String(sampleRate), encoding: "pcm_s16le", format_turns: "true" });
-  if (keyterms.length) q.set("keyterms_prompt", JSON.stringify(keyterms));
-  return q;
-}
 
 export class AaiStream extends EventEmitter {
   /**
@@ -27,7 +21,7 @@ export class AaiStream extends EventEmitter {
    */
   constructor({ apiKey = process.env.ASSEMBLYAI_API_KEY, sampleRate, url = AAI_URL, keyterms = [] }) {
     super();
-    if (!apiKey && url === "wss://streaming.assemblyai.com/v3/ws") throw new Error("ASSEMBLYAI_API_KEY is not set");
+    if (!apiKey && url === AAI_WS_URL) throw new Error("ASSEMBLYAI_API_KEY is not set");
     if (!(Number.isFinite(sampleRate) && sampleRate > 0)) throw new Error("sampleRate must be a positive number");
     const bytes = (ms) => Math.round((sampleRate * 2 * ms) / 1000) & ~1;   // PCM16 mono: 2 bytes per sample
     this.chunk = { min: bytes(CHUNK_MS.min), max: bytes(CHUNK_MS.max) };
@@ -77,7 +71,3 @@ export class AaiStream extends EventEmitter {
     } else if (this.ws.readyState === WebSocket.CONNECTING) this.ws.terminate();
   }
 }
-
-// Words the recognizer should expect on this line (boosts accuracy on legal/benefits vocabulary).
-export const KEYTERMS = ["Social Security", "reconsideration", "unlawful detainer", "summons", "three day notice",
-  "eviction", "Medi-Cal", "CalFresh", "Notice of Action", "SSI", "disability", "landlord"];
