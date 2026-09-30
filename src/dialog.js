@@ -6,6 +6,8 @@ const NO = /\b(no|nope|nah|not now|no thanks|that's wrong|wrong)\b/i;
 const HOW = /\b(how|explain|counted|count|why)\b/i;
 const REPEAT = /\b(repeat|again|say that again|what was that|pardon)\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
+const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
+const ASK_DATE = "What date is on it? You can say something like September 13th.";
 
 export const GREETING = "Deadline Line. Tell me what kind of letter you got and the date on it. For example: " +
   "a letter from Social Security dated September 13th, or eviction papers handed to me yesterday.";
@@ -16,20 +18,26 @@ export class Dialog {
     this.call = callTool;
     this.today = today;           // optional fixed date (tests / demos)
     this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.last = GREETING;
+    this.candidates = [];         // the kinds a "which one?" question offered, so the answer is matched among them
+    this.dateQuestion = null;     // how to ask for this letter's date ("What day were the papers handed to you?")
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
   say(text, done = false) { this.last = text; return { say: text, done }; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
-  snapshot() { return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last }; }
+  snapshot() {
+    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion };
+  }
 
   /** Pick a conversation back up from snapshot(). */
   static async restore(callTool, snap = {}, opts = {}) {
     const dialog = new Dialog(callTool, opts);
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
+    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null;
     if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
     return dialog;
   }
@@ -50,27 +58,33 @@ export class Dialog {
       if (YES.test(t)) { this.awaiting = null; return this.say("Okay. In the real service I'd text the date and a calendar reminder to this number. " + this.closing(), true); }
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
+    if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
+      if ((NO.test(t) || BYE.test(t)) && !LETTERISH.test(t)) return this.goodbye();
+      this.reset();
+      if (YES.test(t) && !LETTERISH.test(t)) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
+    }
     if (BYE.test(t) && !/\bletter|notice|papers\b/i.test(t)) return this.goodbye();
 
-    const det = await this.call("detect_letter", this.args({ text: t }));
-    if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; }
+    const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates } : { text: t }));
+    this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
+    if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
-    if (this.letter && this.date) return this.answer();
+    if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer();
+    if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
       this.awaiting = "date";
-      const ask = "What date is on it? You can say something like September 13th.";
+      const ask = this.dateQuestion ?? ASK_DATE;
       // Name the letter only when this turn is what identified it; otherwise just ask for the date again.
       return this.say(det.recognized && det.letter_title ? `Got it: ${det.letter_title}. ${ask}` : `I still need the date on the letter. ${ask}`);
     }
     this.awaiting = "letter";
-    return this.say(this.date
-      ? "Got the date. What kind of letter is it: Social Security, a landlord notice, eviction court papers, or Medi-Cal or CalFresh?"
-      : "I can help with letters from Social Security, a landlord's three day notice, eviction court papers, or Medi-Cal and CalFresh. Which one did you get, and what date is on it?");
+    // The rules engine's own "which kind?" question, so it names every kind of letter it knows.
+    return this.say(this.date ? `Got the date. ${det.speech}` : `${det.speech} And what date is on it?`);
   }
 
   async compute() {
-    const r = await this.call("compute_deadline", this.args({ letter_type: this.letter, notice_date: this.date }));
+    const r = await this.call("compute_deadline", this.args(this.date ? { letter_type: this.letter, notice_date: this.date } : { letter_type: this.letter }));
     // compute_deadline's speech is complete but long; on the phone, lead with the date and offer the rest.
     const counted = r.speech.match(/Here's how I counted\. (.*?) First step:/s)?.[1] ?? r.how_we_counted.join(" ");
     return (this.result = { ...r, how_we_counted_spoken: counted });
@@ -78,11 +92,16 @@ export class Dialog {
 
   async answer() {
     const r = await this.compute();
-    this.awaiting = "more";
-    const head = r.passed
-      ? `That deadline was ${r.deadline_spoken}. It may not be too late: ask for more time in writing, and call free legal aid today.`
-      : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
-    return this.say(`${head} ${r.what_to_do}. First step: ${r.next_steps[0]} For free help, ${r.free_help[0].name}. Want me to explain how I counted?`);
+    const counted = r.how_we_counted.length > 0;
+    this.awaiting = counted ? "more" : "another";
+    // A dated SOLID answer says the date; a HEDGE one says what it usually is and points to the notice; a letter
+    // that prints its own date (a jury summons) just says so. The rules engine words the last two.
+    const head = r.deadline === null || r.confidence === "HEDGE" ? r.lead_spoken
+      : r.passed
+        ? `That deadline was ${r.deadline_spoken}. It may not be too late: ask for more time in writing, and call free legal aid today.`
+        : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
+    const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
+    return this.say(`${head} ${r.what_to_do}. First step: ${r.next_steps[0]} For free help, ${r.free_help[0].name}. ${next}`);
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }

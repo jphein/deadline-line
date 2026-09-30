@@ -36,6 +36,10 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["I got eviction papers.", "What do you mean?", "They were handed to me on the 22nd of September.", "can you repeat that", "no, goodbye"],
       ["hi, I got some kind of letter and I'm worried", "can you repeat that", "My landlord taped a three day notice on my door yesterday."],
       ["The county says my CalFresh is stopping. The notice is dated September 1st.", "no"],
+      ["I got a summons", "it's for jury duty", "no"],
+      ["I got court papers", "a debt collector, about money", "September 21st", "how did you count?", "no thanks"],
+      ["I got a jury summons", "yes", "My landlord taped a three day notice on my door yesterday."],
+      ["I got a summons", "I don't know", "it's from my landlord", "the 22nd of September"],
     ];
     for (const turns of scripts) {
       const phone = new Dialog(mcp.callTool, { today: TODAY }), expected = [];
@@ -56,11 +60,12 @@ test("api/decode: the SSA sample gives the real date, explains on request, and s
 test("api/decode GET: the greeting and a new conversation", T, async () => {
   const r = await decodeApi.GET(req("/api/decode"));
   assert.equal(r.status, 200); assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING } });
+  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null } });
 });
 
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
-  assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7 }), { letter: null, date: null, awaiting: null, last: undefined });
+  assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
+    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null });
   assert.deepEqual(cleanState({ letter: "ssa-initial", date: "2026-09-13", awaiting: "more", last: "x".repeat(5000) }).last.length, 2000);
   assert.deepEqual(cleanState("nope"), {});
   const r = await decodeApi.POST(req("/api/decode", { body: { transcript: "yes", state: { letter: "x", awaiting: "more", result: { how_we_counted_spoken: "lies" } }, today: TODAY } }));
