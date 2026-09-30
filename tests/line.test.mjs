@@ -426,8 +426,13 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
     for (const x of ["the bar association lawyer said my notice of default is real", "I got a notice of default, the neighborhood association meeting is tonight",
       "the credit union association sent a notice of default on my house"]) { const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x); }
     // A condo association, and the ways ASR spells HOA.
-    for (const x of ["my condo association sent a notice of default", "the H.O.A. sent a notice of default", "the h o a sent a notice of default"]) {
+    for (const x of ["my condo association sent a notice of default", "the H.O.A. sent a notice of default", "the h.o.a. sent a notice of default",
+      "the H O A sent a notice of default"]) {
       const [, a] = await run([x]); assert.equal(times(a), 1, x);
+    }
+    // The spaced form only in capitals: lowercase "ho a" is ordinary speech to ASR.
+    for (const x of ["I got a notice of default, is there a ho a hearing", "the h o a sent a notice of default"]) {
+      const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
     // The HOA named first, then the notice turns out to be the lender's: no step.
     const [, lender] = await run(["my HOA sent me a letter", "actually it's from my mortgage lender, a notice of default"]);

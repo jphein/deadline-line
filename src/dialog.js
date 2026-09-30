@@ -13,7 +13,10 @@ const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i
 const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
-const HOA = /\b(H\.?\s?O\.?\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
+// "HOA" and "H.O.A." in any case; ASR's spaced "H O A" only in capitals, since "ho a hearing" is ASR too.
+const HOA_ANYCASE = /\b(HOA\b|H\.\s?O\.\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
+const HOA_SPACED = /\bH O A\b/;
+const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_SPACED.test(t) };
 // The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
 const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
