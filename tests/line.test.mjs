@@ -131,7 +131,7 @@ test("dialog: unknown letter asks which kind; repeat works", async () => {
   try {
     const d = new Dialog(mcp.callTool, { today: TODAY });
     const a = await d.handle("hi, I got some kind of letter and I'm worried");
-    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it about Social Security, your rent or your home, a court case or jury duty, a parking ticket, a shutoff notice, a debt collector or a repossessed car, unemployment benefits, taxes or the IRS, or Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
+    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it about Social Security, your rent or your home, a court case or jury duty, a traffic or parking ticket, or the DMV, a shutoff notice, a debt collector or a repossessed car, unemployment benefits, taxes or the IRS, or Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
     const b = await d.handle("can you repeat that");
     assert.equal(b.say, a.say);
   } finally { await mcp.close(); }
@@ -308,5 +308,23 @@ test("dialog: a date answer is read the way the known letter's date is (a shutof
     const a = await d.handle("the due date was August 1st");                      // Aug 1 + 60 = Wed Sep 30
     assert.match(a.say, /^Most water systems can't shut off your water before Wednesday, September 30, 2026/);
     assert.equal(d.date, "2026-08-01");
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a Social Security denial that mentions a hearing asks whether the hearing has happened", async () => {
+  const mcp = await startMcp();
+  try {
+    for (const [answer, letter] of [["not yet", "ssa-recon"], ["yes, I already had it", "ssa-appeals-council"]]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      const q = await d.handle("social security denied me again and my hearing is scheduled");
+      assert.equal(q.say, "Have you already had your Social Security hearing with a judge?");
+      const a = await d.handle(answer);
+      assert.equal(d.letter, letter, answer);
+      assert.match(a.say, /^Got it: Social Security/, answer);
+    }
+    // "I don't know" asks again.
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await d.handle("social security denied me again and my hearing is scheduled");
+    assert.equal((await d.handle("I don't know")).say, "Have you already had your Social Security hearing with a judge?");
   } finally { await mcp.close(); }
 });
