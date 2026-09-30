@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test --test-force-exit \"tests/*.test.mjs\""
+    "test": "node --test --test-force-exit tests/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
