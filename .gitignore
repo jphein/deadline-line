@@ -4,3 +4,6 @@ scratch/
 .env
 asterisk/demo-auth.conf
 .vercel
+.dev.vars
+.wrangler
+dist-check

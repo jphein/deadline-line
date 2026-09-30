@@ -1,0 +1,14 @@
+# Cloudflare Workers: the browser demo (the page in public/ and the functions in src/handlers.js).
+# The API key is a secret, never a var here: npx wrangler secret put ASSEMBLYAI_API_KEY
+# The phone line and the neural voice need the Node server (npm start); they don't run on Workers.
+name = "deadline-line"
+main = "worker.js"
+compatibility_date = "2026-09-29"
+workers_dev = true
+
+[assets]
+directory = "public"
+binding = "ASSETS"
+
+[observability]
+enabled = true
