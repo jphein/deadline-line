@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 99652d1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 43ca02b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // mcp.js — registers Deadline Decoder's tools on an MCP server. One server per request
 // (stateless Streamable HTTP), so this factory must be cheap and side-effect free.
@@ -16,7 +16,8 @@ const INSTRUCTIONS = `Deadline Decoder answers "when is my deadline?" for letter
 and courts, and benefits; list_letter_types has the full list, with the date to ask for.
 Never compute a deadline yourself: always call compute_deadline, and read its "speech" field aloud (it is written
 for the ear). If the user describes or reads out a letter, call detect_letter first. If it returns candidates, ask
-its "speech" question, then call detect_letter again with the answer and among set to those candidates. Always
+its "speech" question, then call detect_letter again with the answer and among set to those candidates. When the user answers a question
+about the date, pass the letter you already know as letter_type. Always
 confirm the date you pass as notice_date; letters whose needs_date is false print their own date and take none.
 A "HEDGE" answer is what the deadline usually is: say so, and point to the date on the notice.
 Answers are general information, not legal advice; point people to the free help the tool returns.`;
@@ -50,10 +51,11 @@ export function createMcpServer({ now } = {}) {
       text: z.string().min(1).describe("The letter's text, or the user's description of it in their own words"),
       today: isoDate.optional().describe("Override today's date, used to resolve dates spoken without a year"),
       among: z.array(z.enum(LETTER_IDS)).max(10).optional().describe("The candidates a previous detect_letter returned, when this text answers its question"),
+      letter_type: z.enum(LETTER_IDS).optional().describe("The kind of letter already identified, when this text answers the question about its date"),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async ({ text, today: t, among }) => {
-    try { return result(detectLetter(text, t ?? today(), among ?? [])); } catch (e) { return failure(e); }
+  }, async ({ text, today: t, among, letter_type }) => {
+    try { return result(detectLetter(text, t ?? today(), among ?? [], { letterType: letter_type })); } catch (e) { return failure(e); }
   });
 
   server.registerTool("compute_deadline", {
