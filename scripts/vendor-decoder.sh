@@ -8,7 +8,9 @@ set -euo pipefail
 src=$(cd "${1:?usage: scripts/vendor-decoder.sh <path to a deadline-decoder-mcp checkout>}" && pwd)
 dest="$(cd "$(dirname "$0")/.." && pwd)/vendor/deadline-decoder-mcp"
 [ -z "$(git -C "$src" status --porcelain -- src LICENSE package.json)" ] || { echo "upstream has uncommitted changes in src/, LICENSE or package.json; commit them first" >&2; exit 1; }
-sha=$(git -C "$src" rev-parse --short HEAD) branch=$(git -C "$src" rev-parse --abbrev-ref HEAD)
+# The full commit in each header, so a test can check it against UPSTREAM.sha256 exactly (a short sha hides
+# tampering in its unseen digits).
+sha=$(git -C "$src" rev-parse HEAD) branch=$(git -C "$src" rev-parse --abbrev-ref HEAD)
 license=$(node -p "require(process.argv[1]).license" "$src/package.json")
 for f in src/server.js src/mcp.js src/decoder.js src/rules/dates.js src/rules/rules.js; do
   mkdir -p "$dest/$(dirname "$f")"

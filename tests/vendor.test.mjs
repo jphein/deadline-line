@@ -22,10 +22,10 @@ test("the vendored engine matches its recorded upstream files byte for byte", ()
     if (file !== "LICENSE") {
       const rows = text.split("\n");
       const at = rows[0].startsWith("#!") ? 1 : 0;
-      const cited = rows[at].match(/^\/\/ Vendored from jphein\/deadline-decoder-mcp \((\S+) @ ([0-9a-f]+)\)/);
+      const cited = rows[at].match(/^\/\/ Vendored from jphein\/deadline-decoder-mcp \((\S+) @ ([0-9a-f]{7,40})\)/);
       assert.ok(cited, `${file}: header`);
       assert.equal(cited[1], recorded[1], `${file}: header cites the recorded branch`);
-      assert.ok(recorded[2].startsWith(cited[2]), `${file}: header cites ${cited[2]}, the hashes are from ${recorded[2]}`);
+      assert.equal(cited[2], recorded[2], `${file}: header cites ${cited[2]}, the hashes are from ${recorded[2]} (the full sha, exactly)`);
       assert.match(rows[at + 1], /^\/\/ Upstream edits belong upstream/, `${file}: header`);
       rows.splice(at, 2);
       text = rows.join("\n");
