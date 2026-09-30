@@ -1,23 +1,24 @@
-// Vendored from jphein/deadline-decoder-mcp (commit 7c377f8, published under MIT; src/ is unchanged
-// through that repo's later AGPL relicense). Licensed MIT by its author, Jeffrey Pine Hein, for this project.
-// See vendor/deadline-decoder-mcp/LICENSE. Upstream edits belong upstream; re-vendor rather than patch here.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 9e46772), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // mcp.js — registers Deadline Decoder's tools on an MCP server. One server per request
 // (stateless Streamable HTTP), so this factory must be cheap and side-effect free.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { listLetterTypes, computeDeadline, detectLetter, makeReminder, todayIso, DecoderError } from "./decoder.js";
+import { RULES } from "./rules/rules.js";
 
 export const SERVER_INFO = { name: "deadline-decoder", version: "0.1.0" };
 
-const LETTER_IDS = ["ssa-recon", "ssa-initial", "ca-3day", "ca-ud", "ca-noa"];
+const LETTER_IDS = RULES.map(r => r.id);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD");
 
-const INSTRUCTIONS = `Deadline Decoder answers "when is my deadline?" for five kinds of letters: Social Security denials
-(initial and reconsideration), California 3-day notices to pay rent or quit, California eviction court papers
-(unlawful detainer summons), and Medi-Cal/CalFresh Notices of Action.
+const INSTRUCTIONS = `Deadline Decoder answers "when is my deadline?" for letters about Social Security, California housing
+and courts, and benefits; list_letter_types has the full list, with the date to ask for.
 Never compute a deadline yourself: always call compute_deadline, and read its "speech" field aloud (it is written
-for the ear). If the user describes or reads out a letter, call detect_letter first; if it is ambiguous, ask which
-letter it is using the titles from list_letter_types. Always confirm the date you pass as notice_date.
+for the ear). If the user describes or reads out a letter, call detect_letter first. If it returns candidates, ask
+its "speech" question, then call detect_letter again with the answer and among set to those candidates. Always
+confirm the date you pass as notice_date; letters whose needs_date is false print their own date and take none.
+A "HEDGE" answer is what the deadline usually is: say so, and point to the date on the notice.
 Answers are general information, not legal advice; point people to the free help the tool returns.`;
 
 function result(obj) {
@@ -48,10 +49,11 @@ export function createMcpServer({ now } = {}) {
     inputSchema: {
       text: z.string().min(1).describe("The letter's text, or the user's description of it in their own words"),
       today: isoDate.optional().describe("Override today's date, used to resolve dates spoken without a year"),
+      among: z.array(z.enum(LETTER_IDS)).max(10).optional().describe("The candidates a previous detect_letter returned, when this text answers its question"),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async ({ text, today: t }) => {
-    try { return result(detectLetter(text, t ?? today())); } catch (e) { return failure(e); }
+  }, async ({ text, today: t, among }) => {
+    try { return result(detectLetter(text, t ?? today(), among ?? [])); } catch (e) { return failure(e); }
   });
 
   server.registerTool("compute_deadline", {
@@ -59,7 +61,7 @@ export function createMcpServer({ now } = {}) {
     description: "Exact, cited deadline math for one letter: the deadline date, days left, what to do, how it was counted (mailing presumptions, skipped weekends and court holidays), next steps, free help and legal sources. The 'speech' field is ready to read aloud.",
     inputSchema: {
       letter_type: z.enum(LETTER_IDS).describe("An id from list_letter_types"),
-      notice_date: isoDate.describe("For Social Security and Medi-Cal/CalFresh: the date printed on the notice. For California eviction notices and court papers: the date the person was served."),
+      notice_date: isoDate.optional().describe("The date list_letter_types says to ask for: usually the date printed on the notice, or the date the person was served. Omit it only for letters whose needs_date is false."),
       today: isoDate.optional().describe("Override today's date (defaults to today in California)"),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },

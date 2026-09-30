@@ -1,10 +1,12 @@
-// Vendored from jphein/deadline-decoder-mcp (commit 7c377f8, published under MIT; src/ is unchanged
-// through that repo's later AGPL relicense). Licensed MIT by its author, Jeffrey Pine Hein, for this project.
-// See vendor/deadline-decoder-mcp/LICENSE. Upstream edits belong upstream; re-vendor rather than patch here.
-// decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in
-// src/rules/ (copied unchanged from Deadline Decoder). No I/O here, so every answer is testable.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 9e46772), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
+// (which began as Deadline Decoder's and have grown since). No I/O here, so every answer is testable.
 import { d, iso, addDays, daysBetween, fmt, findDates } from "./rules/dates.js";
-import { RULES, detect } from "./rules/rules.js";
+import { RULES, SPOKEN_ORDER, AMBIGUOUS, detect } from "./rules/rules.js";
+
+export { KEYTERMS } from "./rules/rules.js";
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -29,7 +31,8 @@ function findRule(id) {
 }
 
 export function listLetterTypes() {
-  return RULES.map(r => ({ id: r.id, title: r.title, description: r.plain, date_to_ask_for: r.dateLabel }));
+  return RULES.map(r => ({ id: r.id, title: r.title, description: r.plain, date_to_ask_for: r.dateLabel ?? null,
+    family: r.family, confidence: r.confidence, needs_date: r.anchor !== null }));
 }
 
 // The rules write their working for the eye ("2026-09-25 skipped — Native American Day.").
@@ -50,36 +53,45 @@ function daysPhrase(n) {
   return `${-n} days ago — it has passed`;
 }
 
+// A SOLID rule states the deadline. A HEDGE rule says what it usually is and sends people to the date on their
+// notice; one with nothing to count (a jury summons prints its own date) just says so.
 export function computeDeadline(letterType, noticeDate, today = todayIso()) {
   const rule = findRule(letterType);
-  const notice = parseIso(noticeDate, "notice_date");
   const now = parseIso(today, "today");
+  const notice = rule.anchor === null && noticeDate == null ? null : parseIso(noticeDate, "notice_date");
   const r = rule.compute(notice);
+  const help = `For free help: ${r.help[0].name}, ${r.help[0].how}.`;
+  const common = {
+    letter_type: rule.id, letter_title: rule.title, notice_date: noticeDate ?? null, confidence: rule.confidence,
+    what_to_do: r.headline, how_we_counted: r.math, next_steps: r.steps, free_help: r.help, sources: r.sources,
+  };
+  if (!r.deadline) {
+    const lead = r.hedge;
+    return { ...common, deadline: null, deadline_spoken: null, days_left: null, passed: false, lead_spoken: lead,
+      speech: [lead, `${r.headline}.`, `First step: ${r.steps[0]}`, help, "This is general information, not legal advice."].join(" ") };
+  }
   const daysLeft = daysBetween(now, r.deadline);
-  const late = daysLeft < 0;
-  const speech = [
-    late
+  const late = daysLeft < 0, hedged = rule.confidence === "HEDGE";
+  const lead = hedged
+    ? `For this kind of notice the deadline is usually ${fmt(r.deadline)}, ${daysPhrase(daysLeft)}. Check the notice itself: if it gives a different date, go by the notice.`
+    : late
       ? `The deadline was ${fmt(r.deadline)}, ${daysPhrase(daysLeft)}. It may not be too late: ask for more time in writing and explain why, and call free legal aid today.`
-      : `Your deadline is ${fmt(r.deadline)}, ${daysPhrase(daysLeft)}.`,
+      : `Your deadline is ${fmt(r.deadline)}, ${daysPhrase(daysLeft)}.`;
+  const speech = [
+    lead,
     `${r.headline}.`,
     `Here's how I counted. ${r.math.map(forTheEar).join(" ")}`,
     `First step: ${r.steps[0]}`,
-    `For free help: ${r.help[0].name}, ${r.help[0].how}.`,
+    help,
     "This is general information, not legal advice.",
   ].join(" ");
   return {
-    letter_type: rule.id,
-    letter_title: rule.title,
-    notice_date: noticeDate,
+    ...common,
     deadline: iso(r.deadline),
     deadline_spoken: fmt(r.deadline),
     days_left: daysLeft,
     passed: late,
-    what_to_do: r.headline,
-    how_we_counted: r.math,
-    next_steps: r.steps,
-    free_help: r.help,
-    sources: r.sources,
+    lead_spoken: lead,
     speech,
   };
 }
@@ -109,36 +121,44 @@ export function findSpokenDates(text, today = todayIso()) {
   return out;
 }
 
-// How people *say* it, as opposed to what the letter prints. Used when the printed-letter
-// detector (rules.js) finds nothing, or to hear "denied again". Most specific first.
-const SPOKEN = [
-  ["ca-ud", /\b(eviction|court) papers\b|\bsummons\b|unlawful detainer|\bsu(ed|ing) (me )?to evict/i],
-  ["ca-3day", /\b(3|three)[- ]day notice\b|\bnotice to pay (rent )?or quit\b/i],
-  ["ca-noa", /notice of action|\b(medi-?cal|calfresh|cal fresh|food stamps|ebt|cash aid|calworks)\b/i],
-  ["ssa-recon", /\b(social security|ssi|ssdi|disability)\b.*\b(again|second time|twice)\b|\b(again|second time|twice)\b.*\b(social security|ssi|ssdi|disability)\b/i],
-  ["ssa-initial", /\b(social security|ssi|ssdi)\b.*\b(denied|turned (me )?down|rejected|said no)\b|\b(denied|turned down|rejected)\b.*\b(social security|ssi|ssdi|disability)\b/i],
-];
+// How people *say* it, as opposed to what the letter prints: each rule's `spoken` pattern, tried in
+// SPOKEN_ORDER (most specific first). Used when the printed-letter detector finds nothing, or to hear "denied again".
 function detectSpoken(text) {
-  const hit = SPOKEN.find(([, re]) => re.test(text));
-  return hit ? RULES.find(r => r.id === hit[0]) : null;
+  for (const id of SPOKEN_ORDER) { const r = RULES.find(x => x.id === id); if (r?.spoken?.test(text)) return r; }
+  return null;
 }
 
-export function detectLetter(text, today = todayIso()) {
+// Who sends each family of letters, for "which kind is it?" (in this order, when the family has rules).
+const FAMILY_ASK = [["ssa", "Social Security"], ["housing", "a landlord"], ["court", "a court"],
+  ["benefits", "the county about Medi-Cal, CalFresh or CalWORKs"]];
+const families = new Set(RULES.map(r => r.family));
+const asked = FAMILY_ASK.filter(([f]) => families.has(f)).map(([, who]) => who);
+export const UNKNOWN_LETTER = `I couldn't tell which kind of letter that is. Is it from ${asked.slice(0, -1).join(", ")}, or ${asked.at(-1)}?`;
+
+/** Which kind of letter is this? `among`: the candidate ids from a "which one?" question, to match the answer to. */
+export function detectLetter(text, today = todayIso(), among = []) {
   if (typeof text !== "string") throw new DecoderError("text must be a string");
-  // A printed initial denial names "reconsideration" as the next step, so the printed detector
-  // can't hear "denied *again*"; the spoken detector can, and wins in that one case.
-  const printed = detect(text), spoken = detectSpoken(text);
-  const rule = printed?.id === "ssa-initial" && spoken?.id === "ssa-recon" ? spoken : (printed ?? spoken);
+  let rule = among.map(findRule).find(r => r.answers?.test(text)) ?? null;
+  if (!rule) {
+    // A printed initial denial names "reconsideration" as the next step, so the printed detector
+    // can't hear "denied *again*"; the spoken detector can, and wins in that one case.
+    const printed = detect(text), spoken = detectSpoken(text);
+    rule = printed?.id === "ssa-initial" && spoken?.id === "ssa-recon" ? spoken : (printed ?? spoken);
+  }
+  const group = rule ? null : AMBIGUOUS.find(g => g.spoken.test(text));
   const dates = [...findDates(text), ...findSpokenDates(text, today)].sort((x, y) => x.at - y.at).map(x => x.iso);
+  const ask = rule?.dateLabel ? (dates[0] ? `I see the date ${fmt(d(dates[0]))}. Is that the ${rule.dateLabel.toLowerCase()}?` : `What is the ${rule.dateLabel.toLowerCase()}?`) : "";
   return {
     letter_type: rule ? rule.id : null,
     letter_title: rule ? rule.title : null,
     recognized: Boolean(rule),
+    confidence: rule ? rule.confidence : null,
+    needs_date: rule ? rule.anchor !== null : null,
+    date_question: rule?.dateQuestion ?? null,
+    candidates: group ? group.candidates : [],
     dates_found: dates,
     suggested_notice_date: dates[0] ?? null,
-    speech: rule
-      ? `That sounds like: ${rule.title}. ${dates[0] ? `I see the date ${fmt(d(dates[0]))}. Is that the ${rule.dateLabel.toLowerCase()}?` : `What is the ${rule.dateLabel.toLowerCase()}?`}`
-      : "I couldn't tell which kind of letter that is. Is it from Social Security, a landlord or court, or the county about Medi-Cal or CalFresh?",
+    speech: rule ? `That sounds like: ${rule.title}.${ask ? ` ${ask}` : ""}` : group ? group.question : UNKNOWN_LETTER,
   };
 }
 
@@ -149,6 +169,7 @@ function icsEscape(s) { return s.replace(/[\\;,]/g, m => `\\${m}`).replace(/\n/g
 // if the deadline is under a week away). Returned as text; the client decides how to deliver it.
 export function makeReminder(letterType, noticeDate, today = todayIso()) {
   const res = computeDeadline(letterType, noticeDate, today);
+  if (!res.deadline) throw new DecoderError(`${res.letter_title} prints its own date, so there's no date for me to put in a reminder. Use the date on it.`);
   if (res.passed) throw new DecoderError(`That deadline (${res.deadline_spoken}) has already passed, so there is nothing to remind about. Ask for more time in writing and call free legal aid.`);
   const deadline = d(res.deadline);
   const trigger = res.days_left > 7 ? "-P7D" : "-PT15H";
