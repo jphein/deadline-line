@@ -367,3 +367,17 @@ test("dialog: 'I read it again and it says September 28th' is a date answer, not
     assert.equal(e.letter, "ssa-overpayment");
   } finally { await mcp.close(); }
 });
+
+test("dialog: an HOA's foreclosure gets the same spoken answer as a deed of trust; the § 5715 step rides in next_steps", async () => {
+  const mcp = await startMcp();
+  try {
+    const say = async (x) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const a = await d.handle(x); return [d, a]; };
+    const [plain, plainA] = await say("I got a notice of default on my house");
+    const [hoa, hoaA] = await say("my HOA sent a notice of default");
+    assert.equal(hoa.letter, "ca-foreclosure-nod");
+    assert.equal(hoaA.say, plainA.say);
+    assert.ok(hoa.result.next_steps.some(s => /^If your homeowners association is foreclosing without going to court over assessments that came due from 2006 on, you may still be able to redeem the home for 90 days after the sale/.test(s)));
+    const [sale] = await say("the HOA is auctioning my condo for unpaid assessments");
+    assert.equal(sale.letter, "ca-foreclosure-sale");
+  } finally { await mcp.close(); }
+});

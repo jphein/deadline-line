@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ e8973053e7c9dc66c4ff5e63fc75ad1838015ef1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ ba64285a4e0db4d92e7ea0dd8f45a8628210ca38), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -203,6 +203,8 @@ export const RULES = [
     id: "ca-ud",
     family: "housing", confidence: "SOLID", anchor: "served",
     spoken: /\beviction papers\b|unlawful detainer|\b(filed|filing|file) (an |the )?eviction\b|\bsu(ed|ing) (me )?to evict|\b(summons|court papers)\b.*\b(evict\w*|landlord|rent|tenant)\b|\b(evict\w*|landlord|rent)\b.*\b(summons|court papers)\b/i,
+    // "UD" only in capitals (so "ud" inside other words, or Spanish "Ud.", isn't it); a sentence-final "UD." is.
+    spokenCase: /\bUD\b/,
     answers: /\b(evict\w*|landlord|rent|tenant|apartment|housing|move out)\b/i,
     keyterms: ["unlawful detainer", "eviction", "summons"],
     title: "California: court papers for an eviction (Summons, unlawful detainer)",
@@ -929,8 +931,7 @@ export const RULES = [
     must: /notice of default|foreclos\w*|behind on (my |the )?(mortgage|house payments?|home loan)|deed of trust/i,
     // Not a tenant whose landlord is being foreclosed on (a tenant has other rights and dates), and not a car, a
     // storage unit or a property-tax default.
-    // …and not an HOA's assessment-lien foreclosure (Civil Code § 5700 et seq. adds its own steps; not verified here).
-    not: /trustee'?s sale|notice of sale|auction|\b(car|vehicle|truck|storage|property tax(es)?|tax sale|landlord|tenant|I rent|renting|renter|HOA|homeowners'? association|assessment lien)\b/i,
+    not: /trustee'?s sale|notice of sale|auction|\b(car|vehicle|truck|storage|property tax(es)?|tax sale|landlord|tenant|I rent|renting|renter)\b/i,
     detect: [/notice of default|election to sell/i, /deed of trust|mortgage|trustee|beneficiary/i, /reinstat\w*|past due|default|foreclos\w*/i],
     spoken: /notice of default|foreclos\w*|behind on (my |the )?(mortgage|house payments?|home loan)/i,
     answers: /\b(default|mortgage|foreclos\w*|home loan)\b/i,
@@ -940,11 +941,13 @@ export const RULES = [
       "You can catch up on the missed payments and costs (reinstate) until 5 business days before the sale date in the notice of sale.",
       "Watch for a Notice of Trustee's Sale: it sets the sale date, and the time to catch up ends 5 business days before it.",
       "Ask the lender in writing for the amount to catch up, and about other options such as a loan modification.",
+      "If your homeowners association is foreclosing without going to court over assessments that came due from 2006 on, you may still be able to redeem the home for 90 days after the sale, and the notice of sale is supposed to mention that right. Ask legal aid right away.",
     ],
     help: [LSNC, LAWHELP, TWO11],
     sources: ["Civil Code § 2924(a)(2)–(4) (at least three months after the notice of default is filed before a notice of sale; the sale no earlier than three months and 20 days after it's recorded)",
               "Civil Code § 2924c(b)(1) (the notice of default's own statement: no sale date may be set until approximately 90 days after it's recorded)",
-              "Civil Code § 2924c(e) (reinstatement from the notice of default until five business days before the sale date in the recorded notice of sale)"],
+              "Civil Code § 2924c(e) (reinstatement from the notice of default until five business days before the sale date in the recorded notice of sale)",
+              "Civil Code § 5715(a)–(b) (for assessment debts arising on and after January 1, 2006, an association's nonjudicial foreclosure for delinquent assessments is subject to a right of redemption that ends 90 days after the sale, and its notice of sale must say so)"],
   }),
   spec({
     id: "ca-foreclosure-sale",
@@ -957,10 +960,11 @@ export const RULES = [
     hedge: "A Notice of Trustee's Sale prints the date the home will be sold. You can usually still catch up on the loan (reinstate) until 5 business days before that date.",
     must: /trustee'?s sale|notice of sale|foreclosure (sale|auction)|auction/i,
     // Not a car, storage, pawn or tax sale; not a tenant (a tenant after a foreclosure sale has other rights and dates);
-    // not an IRS or sheriff's sale for a judgment (not a § 2924 trustee's sale).
-    not: /\b(car|vehicle|truck|storage|pawn|property tax(es)?|tax sale|tax[- ]defaulted|landlord|tenant|I rent|renting|renter|notice to vacate|IRS|internal revenue|sheriff|judgment)\b/i,
+    // not an IRS or sheriff's sale for a judgment (not a § 2924 trustee's sale). An HOA's sale is answered, with the
+    // § 5715 redemption step.
+    not: /\b(car|vehicle|truck|storage|pawn|property tax(es)?|tax sale|tax[- ]defaulted|landlord|tenant|I rent|renting|renter|notice to vacate|IRS|internal revenue|sheriff|(for|to collect) a judgment|judgment (lien|creditor)|writ of execution)\b/i,
     detect: [/trustee'?s sale|notice of sale/i, /deed of trust|trustee|beneficiary|mortgage/i, /auction|public sale|sale date|highest bidder/i],
-    spoken: /trustee'?s sale|notice of sale|foreclosure (sale|auction)|auction(ing)? (off )?my (house|home)|sell(ing)? my (house|home) at (an )?auction|auction date for my (house|home)/i,
+    spoken: /trustee'?s sale|notice of sale|foreclosure (sale|auction)|auction(ing)? (off )?my (house|home|condo)|sell(ing)? my (house|home|condo) at (an )?auction|auction date for my (house|home|condo)/i,
     answers: /\b(sale|auction|trustee)\b/i,
     keyterms: ["Notice of Trustee's Sale", "trustee sale", "reinstate"],
     headline: "Call a housing counselor or legal aid today",
@@ -968,9 +972,11 @@ export const RULES = [
       "Ask the lender in writing, right away, for the amount to catch up (the reinstatement amount).",
       "If the sale is postponed by more than 5 business days, the time to catch up comes back, until 5 business days before the new date.",
       "Don't wait for the last days: ask legal aid now what can still be done.",
+      "If your homeowners association is foreclosing without going to court over assessments that came due from 2006 on, you may still be able to redeem the home for 90 days after the sale, and the notice of sale is supposed to mention that right. Ask legal aid right away.",
     ],
     help: [LSNC, LAWHELP, TWO11],
-    sources: ["Civil Code § 2924c(e) (reinstatement until five business days before the sale date in the recorded notice of sale; revived when a sale is postponed for more than five business days)"],
+    sources: ["Civil Code § 2924c(e) (reinstatement until five business days before the sale date in the recorded notice of sale; revived when a sale is postponed for more than five business days)",
+              "Civil Code § 5715(a)–(b) (for assessment debts arising on and after January 1, 2006, an association's nonjudicial foreclosure for delinquent assessments is subject to a right of redemption that ends 90 days after the sale, and its notice of sale must say so)"],
   }),
   // ---- court: small claims -----------------------------------------------------------------------------------------
   spec({
@@ -984,9 +990,9 @@ export const RULES = [
     hedge: "Small claims papers give the hearing date, and that's the date that counts.",
     must: /small claims|SC-100|plaintiff'?s claim and order/i,
     // Being sued, not suing, and not collecting a judgment you won.
-    // …and never an eviction (a UD needs a written response within 5 court days; small claims can't hear one), unless
+    // …and never an eviction (a UD needs a written response within 10 court days, CCP § 1167 as amended by AB 2347; small claims can't hear one), unless
     // it's a landlord suing for back rent or a deposit with no eviction word.
-    not: /\b(want(ed)? to sue|I('m| am)? (going to )?sue|I('m| am) suing|I sued|file (a|my) (small claims|claim)|I won(?!'t)|collect (my|the|on (a|my|the)) judgment)\b|\b(unlawful detainer|UD)\b|^(?!.*\b(back rent|security deposit)\b).*\bevict\w*/is,
+    not: /\b(want(ed)? to sue|I('m| am)? (going to )?sue|I('m| am) suing|I sued|file (a|my) (small claims|claim)|I won(?!['’]t)|collect (my|the|on (a|my|the)) judgment)\b|\b(unlawful detainer|UD)\b|^(?!.*\b(back rent|security deposit)\b).*\bevict\w*/is,
     detect: [/small claims/i, /plaintiff'?s claim|SC-100|order to go to/i, /hearing|court date|trial date|defendant/i],
     spoken: /small claims/i,
     answers: /\bsmall claims\b/i,
@@ -1111,9 +1117,11 @@ const EDD_FIRST = /^(?:(?!\b(?:social security|SSA|SSI|SSDI)\b).)*\b(EDD|employm
 const anyOf = (...res) => ({ test: (t) => res.some(re => re?.test(t)) });
 // Social Security said only as income ("I'm on SSI", "social security is my income") next to another agency or
 // program's decision (the DMV, the housing authority, the county, a landlord…) isn't a Social Security letter.
-// Not when Social Security (or "they") is itself the one deciding, with the agency only the reason ("social security
-// says I was overpaid because of my EDD payments"); the window can't cross another agency's name.
-const SS_AS_INCOME = /^(?!.*\b(social security|SSA|SSI|SSDI|they)\b(?:(?!\b(DMV|county|landlord|housing authority|EDD|Medi-Cal|CalFresh|IRS|parking)\b).){0,20}\b(says?|said|denied|den(y|ies)|(is|are) (cutting|reducing|stopping|taking)|cut\w*|reduc\w*|stop\w*|overpa\w*|sent)\b)(?=.*\b((I'?m|I am) on|I (get|receive)|I live on|is my income|my income is)\b)(?=.*\b(DMV|DUI|driver'?s license|housing authority|section 8|voucher|county|CalFresh|Medi-Cal|landlord|parking|repair|IRS|EDD)\b)/is;
+// Not when Social Security is itself the one deciding, with the agency only the reason ("social security says I was
+// overpaid because of my EDD payments"); the window can't cross another agency's name. "They" counts as Social
+// Security only when what they cut or stop is Social Security's ("they are cutting it", "…my check"), not "they
+// stopped my Medi-Cal".
+const SS_AS_INCOME = /^(?!.*\b(social security|SSA|SSI|SSDI)\b(?:(?!\b(DMV|county|landlord|housing authority|EDD|Medi-Cal|CalFresh|IRS|parking|they)\b).){0,20}\b(says?|said|denied|den(y|ies)|(is|are) (cutting|reducing|stopping|taking)|cut\w*|reduc\w*|stop\w*|overpa\w*|sent)\b)(?!.*\bthey\b.{0,12}\b((is|are) (cutting|reducing|stopping|taking)|cut\w*|reduc\w*|stop\w*|den(y|ies|ied))\b (it|my (check|SSI|SSDI|benefits|payments?|social security))\b|.*\bthey\b.{0,12}\bden(y|ies|ied) me (again|twice|a second time)\b)(?=.*\b((I'?m|I am) on|I (get|receive)|I live on|is my income|my income is)\b)(?=.*\b(DMV|DUI|driver'?s license|housing authority|section 8|voucher|county|CalFresh|Medi-Cal|landlord|parking|repair|IRS|EDD)\b)/is;
 for (const r of RULES) if (r.family === "ssa") r.not = anyOf(r.not, NOT_SSA, NOT_SSA_VA, EDD_FIRST, SS_AS_INCOME);
 
 // The spoken detector tries rules in this order: most specific first ("a jury summons" before "summons").
@@ -1132,8 +1140,10 @@ export const AMBIGUOUS = [
   // another program), not on a Notice of Reconsideration or an initial denial, which say which letter they are.
   { preempt: true,
     // Social Security (or a disability judge that isn't about a job), a hearing, and an outcome or appeal word: a
-    // custody, immigration or criminal hearing from a caller on SSI isn't asked.
-    spoken: /^(?=.*\b(social security|SSA|SSI|SSDI)\b|(?!.*\b(accommodation|at work|my job|employer)\b)(.*\bdisability\b.*\b(judge|ALJ)\b|.*\b(judge|ALJ)\b.*\bdisability\b))(?=.*\bhearings?\b)(?=.*\b(denied|deny|turned (me )?down|said no|lost|against me|unfavorable|reconsider\w*|appeal\w*|judge|ALJ)\b)/is,
+    // custody, immigration or criminal hearing from a caller on SSI isn't asked. (The outcome-word lookahead is a second
+    // guard: ssa-recon's no-cue exclusion, which `unless` reads, already keeps out a cue-less hearing that names another
+    // court or program.)
+    spoken: /^(?=.*\b(social security|SSA|SSI|SSDI)\b|(?!.*\b(accommodation|at work|my job|employer)\b)(.*\bdisability\b.*\b(judge|ALJ)\b|.*\b(judge|ALJ)\b.*\bdisability\b))(?=.*\bhearings?\b)(?=.*\b(denied|deny|denial|turned (me )?down|said no|rejected|lost|against me|unfavorable|not disabled|again|twice|second time|reconsider\w*|appeal\w*|judge|ALJ)\b)/is,
     unless: (t) => RULES.find(r => r.id === "ssa-recon").not.test(t) || /notice of reconsideration|notice of disapproved claim|\b(initial|first) (determination|denial|decision)\b|(ask|request)( for)? (a )?reconsideration/i.test(t),
     candidates: ["ssa-recon", "ssa-appeals-council"],
     question: "Have you already had your Social Security hearing with a judge?",
