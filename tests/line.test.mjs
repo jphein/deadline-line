@@ -434,6 +434,17 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
     for (const x of ["I got a notice of default, is there a ho a hearing", "the h o a sent a notice of default"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
+    // "Hoa" is a given name, not an HOA; the acronym is.
+    for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default"]) {
+      const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
+    }
+    for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+    // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
+    const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
+    assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
+    assert.equal(await said(["my HOA sent a notice of default", "it's from my HOA"]), 1);
+    // A new letter gets its own step.
+    assert.equal(await said(["my HOA sent a notice of default", "yes", "my HOA sent a notice of trustee's sale"]), 2);
     // The HOA named first, then the notice turns out to be the lender's: no step.
     const [, lender] = await run(["my HOA sent me a letter", "actually it's from my mortgage lender, a notice of default"]);
     assert.equal(times(lender), 0);

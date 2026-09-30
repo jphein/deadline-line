@@ -13,10 +13,11 @@ const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i
 const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
-// "HOA" and "H.O.A." in any case; ASR's spaced "H O A" only in capitals, since "ho a hearing" is ASR too.
-const HOA_ANYCASE = /\b(HOA\b|H\.\s?O\.\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
-const HOA_SPACED = /\bH O A\b/;
-const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_SPACED.test(t) };
+// "H.O.A." in any case; the bare "HOA" in capitals or lowercase, never "Hoa" (a given name); ASR's spaced
+// "H O A" only in capitals, since "ho a hearing" is ASR too.
+const HOA_ANYCASE = /\b(H\.\s?O\.\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
+const HOA_CASED = /\b(HOA|hoa|H O A)\b/;
+const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) };
 // The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
 const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
@@ -35,16 +36,17 @@ export class Dialog {
     this.candidates = [];         // the kinds a "which one?" question offered, so the answer is matched among them
     this.dateQuestion = null;     // how to ask for this letter's date ("What day were the papers handed to you?")
     this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
+    this.hoaSaid = false;         // the HOA step was already spoken for this letter (reset() clears it for the next one)
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
   say(text, done = false) { this.last = text; return { say: text, done }; }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
-    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa };
+    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa, hoaSaid: this.hoaSaid };
   }
 
   /** Pick a conversation back up from snapshot(). */
@@ -52,7 +54,7 @@ export class Dialog {
     const dialog = new Dialog(callTool, opts);
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
-    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true;
+    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
     if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
     return dialog;
   }
@@ -77,7 +79,10 @@ export class Dialog {
     if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !LETTERISH.test(t)) {
       const r = this.result ?? await this.compute();
       const step = r.next_steps.find(s => HOA_STEP.test(s));
-      if (step) return this.say(`${step} ${this.awaiting === "more" ? "Want me to explain how I counted?" : "Do you have another letter I can help with?"}`);
+      const ask = this.awaiting === "more" ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
+      // Said once per letter: a repeated "it's from my HOA" hears that the step was covered, not the step again.
+      if (step && this.hoaSaid) return this.say(`Yes, I've included the homeowners association step for this notice. ${ask}`);
+      if (step) { this.hoaSaid = true; return this.say(`${step} ${ask}`); }
     }
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
       if ((NO.test(t) || BYE.test(t)) && !LETTERISH.test(t)) return this.goodbye();
@@ -135,6 +140,7 @@ export class Dialog {
     // The HOA mention may come on an earlier turn than the answer, so it's carried in the state (cleanState keeps it).
     const hoa = HOA_LETTERS.has(r.letter_type) && (this.hoa || HOA.test(said)) ? r.next_steps.find(s => HOA_STEP.test(s)) : null;
     this.hoa = false;                   // said once, for this letter
+    if (hoa) this.hoaSaid = true;
     return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]}${hoa ? ` ${hoa}` : ""} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
   }
 
