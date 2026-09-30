@@ -19,3 +19,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Scope: this MIT License covers the files of this repository except those under
+vendor/deadline-decoder-mcp/. Those files are vendored from
+jphein/deadline-decoder-mcp and are licensed under the GNU Affero General Public
+License, version 3 or (at your option) any later version, not under this MIT
+License; see vendor/deadline-decoder-mcp/LICENSE and the header of each vendored
+file. If you use, modify or convey them, on their own or as part of a larger
+work, the AGPL's terms apply to them; read it for what it requires, including
+its source-offer terms for network use (section 13).

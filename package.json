@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Call the Deadline Line: a phone and web voice agent that tells you your real deadline. AssemblyAI streaming speech-to-text + the Deadline Decoder MCP server.",
   "type": "module",
-  "license": "MIT",
+  "license": "MIT AND AGPL-3.0-or-later",
   "author": "Jeffrey Pine Hein",
   "engines": {
     "node": ">=20"

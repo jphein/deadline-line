@@ -86,4 +86,9 @@ Sample letters only in demos. The bridge keeps each call's transcript in memory 
 No barge-in yet: while the line is speaking, the caller's words are ignored. California and federal rules only; eviction deadlines assume personal service. General information, not legal advice.
 
 ## License
-MIT © 2026 Jeffrey Pine Hein, except `vendor/deadline-decoder-mcp/`: on this branch it is vendored from the rules engine's `develop` branch, which is AGPL-3.0-or-later (see [its LICENSE](vendor/deadline-decoder-mcp/LICENSE) and the header of each file), so a deployment of this branch offers its source (the page links here). The `public` branch vendors the engine's earlier MIT release. Re-vendor with `scripts/vendor-decoder.sh <checkout>`. Built for [TechEMPOWER](https://techempower.org).
+- **This repository's own files** are MIT © 2026 Jeffrey Pine Hein ([LICENSE](LICENSE)).
+- **`vendor/deadline-decoder-mcp/`** is vendored from the rules engine's `develop` branch and is AGPL-3.0-or-later ([its LICENSE](vendor/deadline-decoder-mcp/LICENSE) and the header of each file).
+- **Using this branch:** the AGPL's terms apply to the vendored engine, including when this branch is conveyed or run for users over a network as part of the app; read [its LICENSE](vendor/deadline-decoder-mcp/LICENSE) for what that requires (section 13 covers network use). The page's "source code" link points to this branch.
+- The `public` branch vendors the engine's earlier MIT release, and its other files are MIT, so it is MIT throughout.
+
+Re-vendor with `scripts/vendor-decoder.sh <checkout>`. Built for [TechEMPOWER](https://techempower.org).
