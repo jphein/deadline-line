@@ -387,3 +387,13 @@ test("dialog: a caller who says HOA hears the § 5715 redemption right; a plain 
     }
   } finally { await mcp.close(); }
 });
+
+test("dialog: 'I got a UD.' (as speech ends, with a period) is heard as eviction papers", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const a = await d.handle("I got a UD.");
+    assert.equal(d.letter, "ca-ud");
+    assert.match(a.say, /^Got it: California: court papers for an eviction \(Summons, unlawful detainer\)\./);
+  } finally { await mcp.close(); }
+});
