@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ e8973053e7c9dc66c4ff5e63fc75ad1838015ef1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ ba64285a4e0db4d92e7ea0dd8f45a8628210ca38), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
@@ -156,7 +156,7 @@ export function findSpokenDates(text, today = todayIso(), { pastDue = false } = 
 // SPOKEN_ORDER (most specific first). Used when the printed-letter detector finds nothing, or to hear "denied again".
 function detectSpoken(text) {
   // A rule's `not` (the letters it must never claim) applies to what people say, too.
-  for (const id of SPOKEN_ORDER) { const r = RULES.find(x => x.id === id); if (r?.spoken?.test(text) && !r.not?.test(text)) return r; }
+  for (const id of SPOKEN_ORDER) { const r = RULES.find(x => x.id === id); if ((r?.spoken?.test(text) || r?.spokenCase?.test(text)) && !r.not?.test(text)) return r; }
   return null;
 }
 

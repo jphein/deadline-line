@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ e8973053e7c9dc66c4ff5e63fc75ad1838015ef1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ ba64285a4e0db4d92e7ea0dd8f45a8628210ca38), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // mcp.js — registers Deadline Decoder's tools on an MCP server. One server per request
 // (stateless Streamable HTTP), so this factory must be cheap and side-effect free.
