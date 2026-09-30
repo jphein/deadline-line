@@ -434,6 +434,17 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
     for (const x of ["I got a notice of default, is there a ho a hearing", "the h o a sent a notice of default"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
+    // "Hoa" is a given name, not an HOA; the acronym is.
+    for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default"]) {
+      const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
+    }
+    for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+    // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
+    const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
+    assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
+    assert.equal(await said(["my HOA sent a notice of default", "it's from my HOA"]), 1);
+    // A new letter gets its own step.
+    assert.equal(await said(["my HOA sent a notice of default", "yes", "my HOA sent a notice of trustee's sale"]), 2);
     // The HOA named first, then the notice turns out to be the lender's: no step.
     const [, lender] = await run(["my HOA sent me a letter", "actually it's from my mortgage lender, a notice of default"]);
     assert.equal(times(lender), 0);
@@ -453,6 +464,18 @@ test("dialog: small claims papers from a debt collector get the small-claims ans
     assert.equal(d.letter, "ca-small-claims");
     assert.match(a.say, /small claims/i);
     assert.doesNotMatch(a.say, /validation notice/i);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a validation notice with the CFPB complaint line gets the validation answer", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const a = await d.handle("Example Collections LLC is a debt collector. We are trying to collect a debt that you owe to Example Bank. " +
+      "How can you dispute the debt? Call or write to us by October 30, 2026, to dispute all or part of the debt. " +
+      "If you have a complaint about how we are collecting this debt, contact the CFPB at www.consumerfinance.gov or call 1-855-411-2372.");
+    assert.equal(d.letter, "debt-validation");
+    assert.doesNotMatch(a.say, /summons|court papers/i);
   } finally { await mcp.close(); }
 });
 
