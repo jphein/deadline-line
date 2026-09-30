@@ -54,6 +54,7 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["I got a notice of trustee's sale", "no"],
       ["my HOA sent a notice of default", "no"],
       ["the HOA is auctioning my condo for unpaid assessments", "no"],
+      ["my homeowners association sent a notice of trustee's sale", "no"],
       ["EDD says I'm not eligible for unemployment, the notice was mailed September 10th", "bye"],
       ["I got a notice to vacate", "sixty days", "September 1st"],
     ];

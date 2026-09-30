@@ -11,6 +11,9 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
 const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
+const HOA = /\b(HOA|homeowners'? association|association)\b/i;
+const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
+const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
 
 export const GREETING = "Deadline Line. Tell me what kind of letter you got and the date on it. For example: " +
@@ -77,7 +80,7 @@ export class Dialog {
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
-    if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer();
+    if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
       this.awaiting = "date";
@@ -97,7 +100,7 @@ export class Dialog {
     return (this.result = { ...r, how_we_counted_spoken: counted });
   }
 
-  async answer() {
+  async answer(said = "") {
     const r = await this.compute();
     const counted = r.how_we_counted.length > 0;
     this.awaiting = counted ? "more" : "another";
@@ -110,7 +113,10 @@ export class Dialog {
     const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
-    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
+    // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).
+    // Only this turn's words count: on Workers and Vercel the dialog is rebuilt from a cleaned state each turn.
+    const hoa = HOA_LETTERS.has(r.letter_type) && HOA.test(said) ? r.next_steps.find(s => HOA_STEP.test(s)) : null;
+    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]}${hoa ? ` ${hoa}` : ""} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
