@@ -88,12 +88,13 @@ export class Dialog {
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
-    // A different letter than the one we were on: an earlier HOA mention was about that one, not this.
-    if (det.recognized && det.letter_type !== this.letter) { if (this.letter) this.hoa = false; this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
+    if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
     if (HOA.test(t)) this.hoa = true;   // "my HOA sent me a letter" → "what kind?" → "a notice of default"
-    else if (LENDER.test(t)) this.hoa = false;   // "…actually it's from my mortgage lender" 
+    // A different sender named ("…actually it's from my mortgage lender") clears an earlier HOA mention; a corrected
+    // letter from the same sender ("my HOA gave me a 3 day notice" → "actually it's a notice of default") doesn't.
+    else if (LENDER.test(t)) this.hoa = false;
     if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
