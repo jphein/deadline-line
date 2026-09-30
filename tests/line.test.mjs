@@ -328,3 +328,19 @@ test("dialog: a Social Security denial that mentions a hearing asks whether the 
     assert.equal((await d.handle("I don't know")).say, "Have you already had your Social Security hearing with a judge?");
   } finally { await mcp.close(); }
 });
+
+test("dialog: a request to repeat still repeats; 'denied me again' is heard as words", async () => {
+  const mcp = await startMcp();
+  try {
+    for (const ask of ["say that again", "can you repeat that", "pardon?", "come again?", "again", "one more time please", "what was that"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      const first = await d.handle("I got a jury summons in the mail");
+      assert.equal((await d.handle(ask)).say, first.say, ask);
+    }
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const jury = await d.handle("I got a jury summons in the mail");
+    assert.notEqual((await d.handle("yes, and social security denied me again")).say, jury.say);   // heard, not replayed
+    const e = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    assert.doesNotMatch((await e.handle("social security denied my disability again")).say, /^Deadline Line\./);
+  } finally { await mcp.close(); }
+});
