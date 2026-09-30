@@ -133,6 +133,21 @@ test("api/token: AssemblyAI refusing, failing or sending no token is a 502 that 
   }
 });
 
+test("api/token: a malformed key never reaches the logs, though fetch's error message quotes it", T, async () => {
+  const bad = "not-a-key\r\nX-Leak: yes", logged = [], warn = console.warn;
+  console.warn = (...a) => logged.push(a.join(" "));
+  try {
+    // new Request() validates headers exactly as fetch() does, with no network: a TypeError that quotes the value
+    const GET = tokenHandler({ env: { ASSEMBLYAI_API_KEY: bad }, fetch: async (url, init) => new Request(url, init) });
+    const r = await GET(req("/api/token"));
+    assert.equal(r.status, 502);
+    assert.ok(!(await r.text()).includes("not-a-key"));
+  } finally { console.warn = warn; }
+  assert.equal(logged.length, 1);
+  assert.ok(!logged[0].includes("not-a-key"), logged[0]);
+  assert.match(logged[0], /TypeError/);
+});
+
 test("api/token: per-visitor hourly cap (x-real-ip), then allowed again an hour later", T, async () => {
   let t = Date.parse("2026-09-29T20:00:00Z");
   const { GET, calls } = token({}, { perIpPerHour: 2 }, () => t);

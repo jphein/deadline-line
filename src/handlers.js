@@ -101,7 +101,8 @@ export function tokenHandler({ env, fetch: fetchImpl, limits = tokenLimits(demoC
       }
       ({ token } = await r.json());
     } catch (e) {
-      console.warn(`token: ${e.name}: ${e.message}`);
+      // Never e.message: for a malformed key (a stray newline, say) fetch's TypeError quotes the header value.
+      console.warn(`token: couldn't reach AssemblyAI: ${e.name}${e.cause?.code ? ` (${e.cause.code})` : ""}`);
       return json({ error: "Couldn't reach AssemblyAI. You can type instead." }, 502);
     }
     if (typeof token !== "string" || !token) return json({ error: "AssemblyAI sent no token. You can type instead." }, 502);
