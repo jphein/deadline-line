@@ -52,7 +52,8 @@ export function cleanState(s) {
   const last = typeof s.last === "string" ? s.last.slice(0, MAX_LAST) : undefined;
   const candidates = Array.isArray(s.candidates) ? [...new Set(s.candidates.filter(c => LETTERS.has(c)))].slice(0, 5) : [];
   const dateQuestion = typeof s.dateQuestion === "string" ? s.dateQuestion.slice(0, 300) : null;
-  return { letter, date, awaiting, last, candidates, dateQuestion };
+  const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
+  return { letter, date, awaiting, last, candidates, dateQuestion, hoa };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).

@@ -27,16 +27,17 @@ export class Dialog {
     this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.last = GREETING;
     this.candidates = [];         // the kinds a "which one?" question offered, so the answer is matched among them
     this.dateQuestion = null;     // how to ask for this letter's date ("What day were the papers handed to you?")
+    this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
   say(text, done = false) { this.last = text; return { say: text, done }; }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
-    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion };
+    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa };
   }
 
   /** Pick a conversation back up from snapshot(). */
@@ -44,7 +45,7 @@ export class Dialog {
     const dialog = new Dialog(callTool, opts);
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
-    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null;
+    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true;
     if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
     return dialog;
   }
@@ -80,6 +81,7 @@ export class Dialog {
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
+    if (HOA.test(t)) this.hoa = true;   // "my HOA sent me a letter" → "what kind?" → "a notice of default"
     if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
@@ -114,8 +116,9 @@ export class Dialog {
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
     // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).
-    // Only this turn's words count: on Workers and Vercel the dialog is rebuilt from a cleaned state each turn.
-    const hoa = HOA_LETTERS.has(r.letter_type) && HOA.test(said) ? r.next_steps.find(s => HOA_STEP.test(s)) : null;
+    // The HOA mention may come on an earlier turn than the answer, so it's carried in the state (cleanState keeps it).
+    const hoa = HOA_LETTERS.has(r.letter_type) && (this.hoa || HOA.test(said)) ? r.next_steps.find(s => HOA_STEP.test(s)) : null;
+    this.hoa = false;                   // said once, for this letter
     return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]}${hoa ? ` ${hoa}` : ""} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
   }
 

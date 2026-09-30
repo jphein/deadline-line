@@ -381,6 +381,13 @@ test("dialog: a caller who says HOA hears the § 5715 redemption right; a plain 
       assert.equal(a.say.split(STEP).length, 2, `${x}: said once`);
       assert.ok(d.result.next_steps.includes(STEP), `${x}: the engine's own step`);
     }
+    // Two turns: the HOA is named first, the notice on the next turn (the flag rides in the state).
+    const two = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await two.handle("my HOA sent me a letter");
+    const second = await two.handle("a notice of default");
+    assert.equal(two.letter, "ca-foreclosure-nod");
+    assert.equal(second.say.split(STEP).length, 2, "two turns: said once");
+    assert.equal(two.snapshot().hoa, false, "cleared once said");
     for (const x of ["I got a notice of default on my house", "I got a notice of trustee's sale"]) {
       const [, a] = await say(x);
       assert.ok(!a.say.includes("homeowners association"), x);
