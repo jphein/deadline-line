@@ -131,7 +131,7 @@ test("dialog: unknown letter asks which kind; repeat works", async () => {
   try {
     const d = new Dialog(mcp.callTool, { today: TODAY });
     const a = await d.handle("hi, I got some kind of letter and I'm worried");
-    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it about Social Security, your rent or your home, a court case or jury duty, a parking ticket, unemployment benefits, taxes or the IRS, or Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
+    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it about Social Security, your rent or your home, a court case or jury duty, a parking ticket, a shutoff notice, a debt collector or a repossessed car, unemployment benefits, taxes or the IRS, or Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
     const b = await d.handle("can you repeat that");
     assert.equal(b.say, a.say);
   } finally { await mcp.close(); }
@@ -296,5 +296,17 @@ test("dialog: the help line reads as a sentence, and a date said as an event isn
     const c = await d.handle("I got it yesterday");                    // Tue Sep 29 + 30 = Thu Oct 29
     assert.match(c.say, /October 29, 2026/);
     assert.match(c.say, / For free help: Legal Services of Northern California, free civil legal aid, lsnc\.net or call your local office\. /);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a date answer is read the way the known letter's date is (a shutoff counted from the bill's due date)", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const q = await d.handle("they're turning off my water");
+    assert.match(q.say, /^Got it: California: a notice that your water will be shut off for an unpaid bill\. When was the unpaid water bill due\?/);
+    const a = await d.handle("the due date was August 1st");                      // Aug 1 + 60 = Wed Sep 30
+    assert.match(a.say, /^Most water systems can't shut off your water before Wednesday, September 30, 2026/);
+    assert.equal(d.date, "2026-08-01");
   } finally { await mcp.close(); }
 });

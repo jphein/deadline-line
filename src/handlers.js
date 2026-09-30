@@ -30,7 +30,7 @@ export const CLIENT_IP = {
  *  (today in California), returning what the MCP client returns (the structured result, as plain JSON). */
 export function localCallTool() {
   const tools = {
-    detect_letter: ({ text, today, among }) => detectLetter(text, today ?? todayIso(), among ?? []),
+    detect_letter: ({ text, today, among, letter_type }) => detectLetter(text, today ?? todayIso(), among ?? [], { letterType: letter_type }),
     compute_deadline: ({ letter_type, notice_date, today }) => computeDeadline(letter_type, notice_date, today ?? todayIso()),
   };
   return async (name, args) => {

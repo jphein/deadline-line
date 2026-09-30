@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 99652d1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 43ca02b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -41,7 +41,7 @@ export const ROLL = {
   dc: { ok: isDcBusinessDay, next: "business day" },
 };
 // The date each kind of rule counts from, as the first counting step says it.
-export const ANCHORS = { notice: "Notice dated", served: "Served", issued: "Issued", mailed: "Mailed" };
+export const ANCHORS = { notice: "Notice dated", served: "Served", issued: "Issued", mailed: "Mailed", received: "Received", due: "The bill was due" };
 const WORDS = ["zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 
 /** Count a rule's days from its anchor date. Returns the last day, the uncorrected last day, and what moved it. */
@@ -107,7 +107,7 @@ export function spec(s) {
 export const RULES = [
   {
     id: "ssa-recon",
-    family: "ssa", confidence: "SOLID", anchor: "notice",
+    family: "ssa", confidence: "SOLID", anchor: "notice", not: /^(?!.*notice of reconsideration).*(hearing decision|\b(administrative law judge|ALJ) (found|decided|dismissed)|notice of decision)/is,
     spoken: /\b(social security|ssi|ssdi|disability)\b.*\b(again|second time|twice)\b|\b(again|second time|twice)\b.*\b(social security|ssi|ssdi|disability)\b/i,
     answers: /\b(again|second|twice|reconsider\w*|hearing)\b/i,
     keyterms: ["Social Security", "reconsideration", "administrative law judge", "SSI", "disability"],
@@ -143,7 +143,7 @@ export const RULES = [
   },
   {
     id: "ssa-initial",
-    family: "ssa", confidence: "SOLID", anchor: "notice",
+    family: "ssa", confidence: "SOLID", anchor: "notice", not: /^(?!.*notice of reconsideration).*(hearing decision|\b(administrative law judge|ALJ) (found|decided|dismissed)|notice of decision)/is,
     spoken: /\b(social security|ssi|ssdi)\b.*\b(denied|turned (me )?down|rejected|said no)\b|\b(denied|turned down|rejected)\b.*\b(social security|ssi|ssdi|disability)\b/i,
     answers: /\b(first|denied|application|turned down)\b/i,
     keyterms: ["Social Security", "SSI", "SSDI", "disability"],
@@ -249,14 +249,17 @@ export const RULES = [
                 "To keep your benefits while you wait, ask BEFORE the date the change takes effect (it is on the notice). This is called \"aid paid pending\".",
                 "Write down the date and time you asked and who you talked to.",
                 "You can bring someone to help you, including free legal aid.",
-                "If the notice is from your Medi-Cal health plan rather than the county, you usually appeal to the plan first, within 60 days of the date on it."],
+                "If the notice is from your Medi-Cal health plan rather than the county, you usually appeal to the plan first, within 60 days of the date on it.",
+                "For a Medi-Cal renewal decision, you may have 120 days from the date the notice was mailed. Check your notice."],
         help: [LSNC, { name: "CDSS State Hearings", how: "(800) 743-8525 (voice and TDD)" }, LAWHELP, TWO11],
         sources: ["Welfare and Institutions Code § 10951 (90 days; good cause up to 180)", "LSNC Guide to CalFresh Benefits — Requesting a fair hearing",
                   "42 CFR 431.211 and 431.230(a) (Medi-Cal: notice at least 10 days before the action; services continue if a hearing is asked for before it)",
-                  "7 CFR 273.13(a)(1) and 273.15(k)(1) (CalFresh: at least 10 days' notice, with exceptions; benefits continue on a timely hearing request, but not past the end of the certification period)"],
+                  "7 CFR 273.13(a)(1) and 273.15(k)(1) (CalFresh: at least 10 days' notice, with exceptions; benefits continue on a timely hearing request, but not past the end of the certification period, and are owed back if the action is upheld)",
+                  "42 CFR 431.231(a) (Medi-Cal: services may be reinstated on a request within 10 days after the date of action)",
+                  "CDSS, State Hearing requests (Medi-Cal renewal decisions: a temporary 120 days from the date the notice was mailed, since April 1, 2023)"],
         // No date of its own: the cutoff is the effective date printed on the notice, usually at least 10 days after
         // it but sometimes less, and the request has to come before it, so no computed day is safe to promise.
-        also: [{ label: "You may be able to keep your benefits while you wait for the hearing, if you ask before the change takes effect. That date is printed on the notice, usually at least 10 days after it, so ask right away.",
+        also: [{ label: "You may be able to keep your benefits while you wait for the hearing, if you ask before the change takes effect. That date is printed on the notice, usually at least 10 days after it, so ask right away. If you lose, you may have to pay back CalFresh benefits you got while waiting.",
                  confidence: "HEDGE", deadline: null }],
       };
     },
@@ -312,6 +315,62 @@ export const RULES = [
     help: [JURY, SELFHELP, TWO11],
     sources: ["Code of Civil Procedure § 209 (a summoned juror who fails to respond can be fined)",
               "California Rules of Court, rule 2.1004 (a one-time postponement) and rule 2.1008 (excuse for undue hardship, in writing)"],
+  }),
+  // ---- traffic: tickets and a DMV suspension after a DUI arrest -------------------------------------------------
+  spec({
+    id: "ca-traffic-ticket",
+    family: "traffic",
+    title: "California: a traffic ticket or a courtesy notice from the traffic court",
+    plain: "A traffic citation (a Notice to Appear) from an officer, or the court's courtesy notice about it. Not a parking ticket.",
+    confidence: "HEDGE",
+    anchor: null,
+    count: null,
+    hedge: "A traffic ticket prints its own date to appear by, and that's the date that counts, unless the court has given you a later one in writing.",
+    must: /\b(traffic|speeding|notice to appear|courtesy notice|moving violation|red light|citation)\b/i,
+    // Not a parking ticket, and not what comes after a missed date (a failure to appear or a civil assessment has
+    // its own rules), or a court date for something else.
+    not: /\bparking\b|fail(ed|ure) to appear|\bFTA\b|civil assessment|\bwarrant\b|\b(missed|didn't (go|show)|did not (go|appear|show))\b.*\b(court|date|appear\w*)\b|\b(evict\w*|landlord|jury|small claims)\b/i,
+    detect: [/\b(traffic|speeding|moving violation|red light|vehicle code)\b/i, /notice to appear|courtesy notice|citation/i, /\b(appear|appearance date|bail|pay|traffic court|trial by (written )?declaration)\b/i],
+    spoken: /^(?=.*\b(traffic|speeding|red light|moving violation|courtesy notice|pulled (me )?over)\b)/is,
+    answers: /\b(traffic|speeding|red light|moving|driving)\b/i,
+    keyterms: ["traffic ticket", "courtesy notice", "trial by written declaration"],
+    headline: "Act by the appearance date on your ticket",
+    steps: [
+      "Act by that date: pay, go to court, or ask for a trial. A courtesy notice from the court may show that date or a later one. If none comes, the ticket's date still counts.",
+      "To fight it by mail (a trial by written declaration), make sure the court gets your written request by the appearance date on the ticket. The clerk then extends that date by 25 calendar days and sends the TR-205 form: file it and deposit the bail by the new date.",
+      "If you can't pay, ask the court clerk what your options are. Don't let the date pass: that can add penalties.",
+    ],
+    help: [SELFHELP, LAWHELP, TWO11],
+    sources: ["California Rules of Court, rule 4.210(b) (a request for a trial by written declaration by the appearance date extends it 25 days; the TR-205 form and bail are due by the appearance date or the extended date)",
+              "Vehicle Code § 40902(a)–(b) (a trial by written declaration for most traffic infractions, with bail submitted with the declaration)",
+              "California Courts Self-Help Guide, Traffic (without a courtesy notice, act by the date on the citation)"],
+  }),
+  spec({
+    id: "ca-dmv-aps",
+    family: "traffic",
+    title: "DMV: a license suspension after a DUI arrest (admin per se)",
+    plain: "The DMV's order suspending your license after a DUI arrest, often a pink notice the officer handed you.",
+    anchor: "received",
+    dateLabel: "Date you got the notice (often the day of the arrest)",
+    dateQuestion: "What day did you get the suspension notice? It's often the day of the arrest. You can say something like September 13th.",
+    count: { days: 10, unit: "calendar", roll: "none" },
+    note: "I count 10 calendar days and don't extend it for a weekend or holiday, so this is the safe date to go by.",
+    // An admin per se order after a DUI arrest only: not a suspension for unpaid tickets, a failure to appear,
+    // points, or no insurance, which have their own rules.
+    must: /admin(istrative)? per se|\bAPS\b|pink (notice|paper|slip)|\b(DUI|driving under the influence|blood alcohol|chemical test|breath(alyzer)? test|refus\w* (the |a )?test)\b/i,
+    not: /unpaid (tickets?|fines?)|fail(ed|ure) to appear|\bFTA\b|\bpoints\b|negligent operator|\binsurance\b|financial responsibility|child support|\bregistration\b/i,
+    detect: [/\b(DMV|department of motor vehicles|driver safety)\b/i, /suspen\w*|revo\w*|admin(istrative)? per se/i, /\b(DUI|driving under the influence|blood alcohol|chemical test|hearing)\b/i],
+    spoken: /admin(istrative)? per se|pink (notice|paper|slip)|^(?=.*\b(dmv|license|licence)\b)(?=.*\b(dui|drunk|blood alcohol|breath(alyzer)? test|refused (the )?test)\b)/is,
+    answers: /\b(dmv|dui|license|licence|per se)\b/i,
+    keyterms: ["admin per se", "DMV hearing", "Driver Safety"],
+    headline: "Ask the DMV for a hearing",
+    steps: [
+      "Call the DMV Driver Safety office on the notice and ask for a hearing, within 10 days of getting it. Write down when you called and who you talked to.",
+      "For this kind of suspension, asking in time means the DMV has to hold the hearing and decide before the suspension starts, or put the suspension on hold until it decides. Asking doesn't stop the suspension by itself.",
+      "The DMV hearing is separate from the criminal case. Ask the public defender or a lawyer about both.",
+    ],
+    help: [LAWHELP, TWO11],
+    sources: ["Vehicle Code § 13558(b) (to have a hearing before the suspension takes effect, ask within 10 days of receiving the notice), (d) (a request postmarked or received within 10 days gets a hearing before the effective date) and (e) (a request doesn't stay the suspension, but the DMV must stay it if it misses that hearing)"],
   }),
   // ---- traffic: parking tickets (Vehicle Code § 40215) -------------------------------------------------------
   spec({
@@ -414,6 +473,60 @@ export const RULES = [
               "20 CFR 404.502a and 404.506(c) (Social Security benefits: recovery doesn't start on a waiver or reconsideration request within 30 days)",
               "20 CFR 416.1336(b) (SSI: payments continue on an appeal within 10 days after receipt)"],
   }),
+  spec({
+    id: "ssa-appeals-council",
+    family: "ssa",
+    title: "Social Security: a judge's decision against you (you can ask the Appeals Council)",
+    plain: "An unfavorable decision, or a dismissal, after a hearing with a Social Security judge.",
+    anchor: "notice",
+    dateLabel: "Date printed on the decision",
+    count: { days: 60, unit: "calendar", mail: 5, roll: "federal" },
+    mailWho: "Social Security",
+    must: /appeals council|hearing decision|administrative law judge|\bALJ\b/i,
+    detect: [/appeals council/i, /\b(hearing decision|administrative law judge|unfavorable|dismiss\w*)\b/i, /social security|supplemental security income|\bSSI\b/i],
+    spoken: /\bappeals council\b|^(?=.*\b(social security|ssi|ssdi|disability)\b)(?=.*\b(judge|hearing|alj)\b)(?=.*\b(denied|lost|unfavorable|said no|against me|dismiss\w*)\b)/is,
+    answers: /\b(judge|hearing|appeals council|decision)\b/i,
+    keyterms: ["Appeals Council", "hearing decision"],
+    headline: "Ask the Appeals Council to review the decision",
+    steps: [
+      "Ask for Appeals Council review, online at ssa.gov or with form HA-520. It's free.",
+      "Keep proof of when you asked.",
+      "If you missed it, you can still ask for more time in writing and explain why (good cause).",
+    ],
+    help: [LSNC, LAWHELP, TWO11, SSA],
+    sources: ["20 CFR 404.968(a)(1) and 416.1468(a) (within 60 days after you receive the notice of the hearing decision or dismissal)",
+              "20 CFR 404.901 and 416.1401 (notice presumed received 5 days after its date)",
+              "20 CFR 404.3(b) and 416.120(d) (a last day on a weekend or federal holiday moves to the next workday)"],
+  }),
+  spec({
+    id: "ssa-benefits-ending",
+    family: "ssa",
+    title: "Social Security or SSI: your benefits will stop or go down (keep them while you appeal)",
+    plain: "A notice that your SSI will be cut, suspended or stopped, or that disability benefits will end because Social Security says you're no longer disabled.",
+    anchor: "notice",
+    dateLabel: "Date printed on the notice",
+    count: { days: 10, unit: "calendar", mail: 5, roll: "none" },
+    mailWho: "Social Security",
+    must: /suspen|reduc|terminat|stop|cease|cessation|ending|no longer disabled/i,
+    not: /overpa(id|yment)/i,
+    detect: [/\b(suspen\w*|reduc\w*|terminat\w*|stop\w*|cease\w*|cessation)\b|no longer disabled/i, /social security|supplemental security income|\bSSI\b|disability/i, /\b(continu\w*|10 days|ten days|appeal)\b/i],
+    spoken: /^(?=.*\b(ssi|social security|ssdi|disability)\b)(?=.*\b(cut\w*|stopp\w*|stop|ending|end|suspend\w*|reduc\w*|going down|terminat\w*|cessation|no longer disabled)\b)/is,
+    answers: /\b(stop\w*|cut\w*|ending|reduc\w*|keep|going down)\b/i,
+    keyterms: ["continued benefits", "cessation", "suspension"],
+    headline: "Appeal, and ask to keep your benefits while you do",
+    also: [{ label: "To appeal at all, you have until {date}, 60 days after you get the notice. After the earlier date, your payments usually stop while you wait, unless you have a good reason for being late.", days: 60, mail: 5 }],
+    steps: [
+      "By this date, appeal in writing. For an SSI cut or stop, appealing in time is usually enough to keep your payments going.",
+      "If it's your disability that's ending, the appeal alone isn't enough: in the same request, ask for reconsideration and say that you want your benefits to continue.",
+      "If you're late, ask anyway and explain why: a good reason can still count.",
+      "If you lose the appeal, you may have to pay back what you got while waiting.",
+      "For retirement, survivors or other benefits that aren't about disability, appealing doesn't keep payments going.",
+    ],
+    help: [LSNC, LAWHELP, TWO11, SSA],
+    sources: ["20 CFR 416.1336(b) (SSI: payments continue on an appeal within 10 days after receipt)",
+              "20 CFR 404.1597a(f)(1) and (g)(1), and 416.996(c) for SSI (disability ending: ask for reconsideration or a hearing and for continued benefits within 10 days after receipt; later, only for good cause)",
+              "20 CFR 404.901 and 416.1401 (receipt presumed 5 days after the notice date)"],
+  }),
   // ---- unemployment -----------------------------------------------------------------------------------------------
   spec({
     id: "ca-edd-determination",
@@ -425,6 +538,7 @@ export const RULES = [
     dateQuestion: "What's the mailing date on the notice? You can say something like September 13th.",
     count: { days: 30, unit: "calendar", roll: "none" },
     must: /\bEDD\b|employment development department|unemployment insurance/i,
+    not: /^(?!.*\b(unemployment|DE 1000M)\b).*\b(disability insurance|state disability|SDI|paid family leave|PFL|DE 2517|DE 2514|DE 8517)\b/is,
     detect: [/\bEDD\b|employment development department/i, /notice of (determination|overpayment)|disqualif|ineligible|not eligible/i, /\b(appeal|unemployment insurance|DE 1000M)\b/i],
     spoken: /^(?=.*\b(edd|unemployment)\b)(?=.*\b(denied|disqualif\w*|not eligible|ineligible|stopped|cut off|turned (me )?down|determination|overpaid|overpayment|pay (it )?back)\b)/is,
     answers: /\b(edd|unemployment|jobless)\b/i,
@@ -439,6 +553,31 @@ export const RULES = [
     sources: ["Unemployment Insurance Code § 1328 (a determination: 30 days from service of the notice; extended for good cause)",
               "Unemployment Insurance Code § 1377 (a Notice of Overpayment: 30 days from the date it was mailed or served; extended for good cause)",
               "EDD, Unemployment Insurance Appeals (30 days from the mail date of the notice; form DE 1000M)"],
+  }),
+  spec({
+    id: "ca-edd-sdi",
+    family: "unemployment",
+    title: "EDD: State Disability Insurance or Paid Family Leave denied (a Notice of Determination)",
+    plain: "A letter from California's Employment Development Department saying you can't get disability (SDI) or Paid Family Leave benefits.",
+    anchor: "notice",
+    dateLabel: "Date printed on the notice",
+    count: { days: 30, unit: "calendar", roll: "none" },
+    must: /\b(disability insurance|state disability|SDI|paid family leave|PFL|DE 2517|DE 2514|DE 8517)\b/i,
+    not: /\bunemployment\b|DE 1000M/i,
+    detect: [/\bEDD\b|employment development department/i, /\b(disability insurance|state disability|SDI|paid family leave|PFL)\b/i, /notice of determination|DE 2517|DE 2514|DE 8517|not eligible|ineligible|disqualif|\bappeal\b/i],
+    spoken: /^(?=.*\b(sdi|state disability|disability insurance|paid family leave|pfl|family leave)\b|.*\bedd\b.*\bdisability\b|.*\bdisability\b.*\bedd\b)(?=.*\b(denied|not eligible|ineligible|disqualif\w*|stopped|cut off|turned (me )?down|determination)\b)(?!.*\b(social security|ssi|ssdi|unemployment)\b)/is,
+    answers: /\b(sdi|state disability|disability insurance|paid family leave|pfl|family leave)\b/i,
+    keyterms: ["State Disability Insurance", "SDI", "Paid Family Leave"],
+    note: "EDD counts the 30 days from the date the notice was issued.",
+    headline: "Appeal to an administrative law judge",
+    steps: [
+      "Appeal within 30 days of the date on the notice, online in myEDD or in writing. Online is fastest: mail can be postmarked later than the day you drop it off.",
+      "If you're late, appeal anyway and say why: the 30 days can be extended for good cause.",
+      "If your benefits come from your employer's own plan (a voluntary plan), appeal by sending a letter to your local EDD field office. You have the right to a hearing before a judge.",
+    ],
+    help: [EDD, LAWHELP, TWO11],
+    sources: ["Unemployment Insurance Code § 2707.2(a) (a disability determination: appeal to an administrative law judge within 30 days from service of the notice; extended for good cause)",
+              "EDD, State Disability Insurance Appeals (DI or PFL: appeal within 30 days of the date the notice was issued; a late appeal must give the reasons; the Notice of Determination is DE 2517 for DI and DE 2514 for PFL; a voluntary plan's denial is appealed by a letter to the local EDD field office, with a hearing before a judge)"],
   }),
   // ---- benefits: a Medi-Cal health plan's appeal decision -----------------------------------------------------------
   spec({
@@ -550,6 +689,230 @@ export const RULES = [
     sources: ["Civil Code § 827(b) (30 days' notice for an increase of 10 percent or less over the past 12 months, 90 days for more; 5 more days if mailed, Code of Civil Procedure § 1013)",
               "Civil Code § 1947.12(a)(1) (for many rentals, no more than 5 percent plus the change in the cost of living, or 10 percent, whichever is lower, in 12 months)"],
   }),
+  spec({
+    id: "ca-sheriff-vacate",
+    family: "housing",
+    title: "California: a sheriff's Notice to Vacate (after an eviction judgment)",
+    plain: "A notice from the sheriff, with a writ of possession, after the court ruled for the landlord in an eviction case.",
+    confidence: "HEDGE",
+    anchor: "served",
+    dateLabel: "Date the sheriff's notice was handed to you or posted",
+    dateQuestion: "What day was the sheriff's notice handed to you or posted on your door? You can say something like September 13th.",
+    count: { days: 5, unit: "calendar", roll: "court" },
+    lead: "You have until {date} to move out",
+    note: "If the notice prints an earlier date to be out by, call legal aid right away and plan for the earlier one. If it was posted and mailed, the 5 days can start before you find it, so don't wait.",
+    must: /\bsheriff\b|writ of possession|marshal|levying officer/i,
+    detect: [/\bsheriff\b|marshal|levying officer/i, /writ of possession|notice to vacate/i, /\b(five|5) days\b|\bvacate\b|\bremov\w*/i],
+    spoken: /\b(sheriff|marshal)\b.*\b(notice|vacate|lock|out|writ|door|remove)\b|\bwrit of possession\b|\blevying officer\b/i,
+    answers: /\b(sheriff|writ|lock\w*|marshal)\b/i,
+    keyterms: ["writ of possession", "sheriff", "Notice to Vacate"],
+    headline: "After that, the sheriff can lock you out. Call free legal aid today about asking the court for more time",
+    steps: [
+      "Call legal aid today about asking the court to stop or delay the lockout, or getting the landlord to hold off. Act right away: asking doesn't stop the lockout by itself, and the court may say no.",
+      "Mailing doesn't add days to the 5. Plan where you'll go, and take your important papers, medicine and pets.",
+      "Things you leave behind are stored for a short time, and you'll get a notice about how to get them back.",
+    ],
+    help: [LSNC, SELFHELP, LAWHELP, TWO11],
+    sources: ["Code of Civil Procedure § 715.020(a)–(c) (the levying officer serves the writ on an occupant, or posts it and serves the judgment debtor; occupants who don't leave within 5 days from service are removed; § 684.120's extra time for mailing doesn't apply)",
+              "Code of Civil Procedure §§ 12 and 12a (the day of service doesn't count; a last day on a weekend or court holiday moves to the next court day)"],
+  }),
+  spec({
+    id: "ca-subsidy-end",
+    family: "housing",
+    title: "California: your landlord is ending a rent subsidy contract (such as Section 8)",
+    plain: "A notice that the owner is ending or not renewing a Section 8 or other government rent-subsidy contract for your home.",
+    anchor: "received",
+    dateLabel: "Date you got the notice",
+    dateQuestion: "What day did you get the notice? You can say something like September 13th.",
+    count: { days: 90, unit: "calendar", roll: "none" },
+    lead: "Your landlord can't make you pay more than your share of the rent through {date}",
+    // The owner ending the contract, not the housing authority ending a family's assistance (a different letter,
+    // with a short window to ask for a hearing), and not a rent increase for a tenant who has a voucher.
+    must: /^(?=.*(section 8|section eight|housing choice voucher|\bvoucher\b|\bHAP\b|housing assistance payment|subsid\w*|rent limitation))(?=.*\b(leav\w* (section 8|section eight|the program)|opt(s|ing|ed)?[- ]out|not (renew|continu)\w*|won't renew|nonrenew\w*|no longer (take|accept)\w*|stop\w* (taking|accepting)|(terminat|end)\w* (the |my |its |our )?(section 8 |section eight |hap |subsidy |voucher |housing assistance payments? )?(contract|agreement)))/is,
+    not: /\b(housing authority|PHA)\b|\bmy voucher\b.*\bterminat|\bterminat\w*\b.*\bmy voucher\b/i,
+    detect: [/section 8|housing choice voucher|\bvoucher\b|\bHAP\b|housing assistance payment|subsid\w*/i, /leav\w* (section 8|section eight|the program)|opt(s|ing|ed)?[- ]out|not (renew|continu)\w*|won't renew|nonrenew\w*|no longer (take|accept)\w*|stop\w* (taking|accepting)|(terminat|end)\w* (the |my |its |our )?(section 8 |section eight |hap |subsidy |voucher |housing assistance payments? )?(contract|agreement)/i, /\b(owner|landlord|contract|90 days|ninety)\b/i],
+    spoken: /^(?!.*\b(housing authority|pha)\b)(?!.*\bmy voucher\b.*\bterminat)(?!.*\bterminat\w*\b.*\bmy voucher\b)(?=.*\b(section 8|section eight|voucher|subsid\w*|housing assistance)\b)(?=.*\b(leav\w* (section 8|section eight|the program)|opt(s|ing|ed)?[- ]out|not (renew|continu)\w*|won't renew|nonrenew\w*|no longer (take|accept)\w*|stop\w* (taking|accepting)|(terminat|end)\w* (the |my |its |our )?(section 8 |section eight |hap |subsidy |voucher |housing assistance payments? )?(contract|agreement)))/is,
+    answers: /\b(section 8|section eight|voucher|subsid\w*)\b/i,
+    keyterms: ["Section 8", "housing choice voucher", "subsidy contract"],
+    headline: "Call your housing authority, and keep paying only your share of the rent",
+    steps: [
+      "Call your housing authority right away. If you have a voucher, ask how to keep using it, where you live now or somewhere new.",
+      "The owner has to give at least 90 days' written notice before the contract ends. In some subsidized buildings (an \"assisted housing development\" under state law), the owner generally has to give 12 months' notice before the subsidy ends.",
+      "If the owner asks for more than your share before that date, ask legal aid.",
+    ],
+    help: [LSNC, LAWHELP, TWO11],
+    sources: ["Civil Code § 1954.535 (at least 90 days' written notice of the termination's effective date; the tenant pays no more than their portion of the rent for 90 days after getting the notice)",
+              "Government Code § 65863.10(b)(1) (an assisted housing development: at least 12 months' notice before a subsidy contract ends, unless § 65863.13 exempts the owner)"],
+  }),
+  // ---- utilities: shutoff notices -------------------------------------------------------------------------------
+  spec({
+    id: "ca-utility-shutoff",
+    family: "utilities",
+    title: "California: a notice that your electricity or gas will be shut off for an unpaid bill",
+    plain: "A past-due or disconnection notice from PG&E, Southern California Edison, SoCalGas, SDG&E or another private energy company.",
+    confidence: "HEDGE",
+    anchor: "mailed",
+    dateLabel: "Date the notice was mailed (printed on it)",
+    count: { days: 15, unit: "calendar", roll: "none" },
+    lead: "A private utility can't shut off your service before {date}",
+    note: "A private utility has to mail the notice at least 15 days before a shutoff, so this is the earliest a shutoff can happen, not the day it will. City and district utilities have their own notice rules.",
+    // A nonpayment disconnection by a private energy company only: not a landlord (Civil Code § 789.3), not a
+    // safety outage, not a city or district utility or propane (§ 779.1 doesn't cover them), not a past-due bill.
+    must: /shut ?off|shut\w* (it |my \w+ )?off|disconnect\w*|terminat\w* (of )?(your )?service|turn\w* off|cut\w* off/i,
+    not: /\b(landlord|owner|manager|PSPS|public safety|fire weather|wildfire|outage|propane|butane|SMUD|LADWP|municipal|utility district|irrigation district|department of water and power)\b|\bcity of [a-z]+( [a-z]+){0,2} (utilities|electric|light|power)\b|\bcity (utilities|electric|light and power)\b|\bhousing authority\b|\bwater (service|bill|system|company|district|department|account)\b/i,
+    detect: [/PG&E|pacific gas|edison|socalgas|SDG&E|\b(electric\w*|gas|energy|power)\b/i, /shut ?off|disconnect\w*|terminat\w*|48[- ]hour|turn\w* off|cut\w* off/i, /\b(notice|pay|payment|arrangement|balance|past due)\b/i],
+    spoken: /^(?=.*\b(pg&e|pg and e|pge|edison|socalgas|sdg&e|electric\w*|power|gas|lights|utility|utilities)\b)(?=.*\b(shut\w* off|shutoff|disconnect\w*|turn\w* off|cut\w* off)\b)/is,
+    answers: /\b(power|electric\w*|gas|pg&e|pge|edison|utility)\b/i,
+    keyterms: ["PG&E", "disconnection notice", "shutoff notice"],
+    headline: "Call the utility before that date and ask for a payment arrangement",
+    steps: [
+      "Call the utility before that date. Ask for a payment arrangement, and ask whether any programs lower your bill (such as CARE).",
+      "If someone in your home has a serious medical condition, say so and ask whether medical protections apply.",
+      "Before shutting it off, the utility has to try to reach you by phone or in person at least 24 hours ahead, or leave a notice at least 48 hours ahead.",
+    ],
+    help: [TWO11, LAWHELP],
+    sources: ["Public Utilities Code § 779.1(a) (no shutoff for nonpayment without a mailed notice at least 10 days ahead; the 10 days start 5 days after it's mailed) and (b) (a try by phone or in person at least 24 hours ahead, or a notice at least 48 hours ahead)"],
+  }),
+  spec({
+    id: "ca-water-shutoff",
+    family: "utilities",
+    title: "California: a notice that your water will be shut off for an unpaid bill",
+    plain: "A past-due or shutoff notice from your water system about a home's water bill.",
+    confidence: "HEDGE",
+    anchor: "due",
+    dateLabel: "Date the unpaid bill was due",
+    dateQuestion: "When was the unpaid water bill due? You can say something like August 1st.",
+    count: { days: 60, unit: "calendar", roll: "none" },
+    lead: "Most water systems can't shut off your water before {date}",
+    note: "This counts from the due date, so it's the earliest possible date: the 60 days run from when the bill became late, which may be a little later. It covers city water and most water companies and districts: since August 2024, any community water system (15 or more homes, or 25 year-round residents). A very small system may differ.",
+    // A water shutoff for nonpayment: not a gas or electric shutoff that mentions hot water or a water heater (unless
+    // it names the water service or bill), not a landlord, not an outage, not a past-due bill.
+    must: /^(?=.*\bwater\b)(?=.*(shut ?off|shut\w* (it |my \w+ )?off|disconnect\w*|discontinu\w*|terminat\w*|turn\w* off|cut\w* off))/is,
+    not: /^(?!.*\bwater (service|bill|system|company|district|department|account)\b).*\b(gas|socalgas|pg&e|pge|sdg&e|edison|electric\w*|power|water heater|hot water)\b|\b(landlord|owner|manager|housing authority|outage|main break|boil)\b/is,
+    detect: [/\bwater\b/i, /shut ?off|disconnect\w*|discontinu\w*|terminat\w*|turn\w* off|cut\w* off/i, /\b(notice|pay|payment|bill|balance|past due)\b/i],
+    spoken: /^(?=.*\bwater\b)(?=.*\b(shut\w* off|shutoff|disconnect\w*|turn\w* off|cut\w* off|discontinu\w*)\b)/is,
+    answers: /\bwater\b/i,
+    keyterms: ["water shutoff", "discontinuation of service"],
+    headline: "Call the water system and ask about a payment plan",
+    steps: [
+      "Call the water system before that date. Ask for a payment plan. If the bill looks wrong, appeal it: while the appeal is pending, the water system can't shut off your water.",
+      "At least 7 business days before a shutoff, the water system has to contact you by phone or in writing.",
+      "If three things are true, the water system must offer you a payment arrangement instead of shutting off your water: a doctor or other primary care provider certifies that a shutoff would seriously threaten the health of someone who lives there, you can't pay within the normal billing cycle (someone gets Medi-Cal, CalFresh, CalWORKs, general assistance, SSI or WIC, or your household income is under twice the poverty level), and you agree to a payment plan. Keep up with the plan and your new bills to stay protected.",
+    ],
+    help: [TWO11, LAWHELP],
+    sources: ["Health and Safety Code § 116908(a)(1) (a covered water system can't shut off a home's service until a payment is at least 60 days late, and must contact the customer at least 7 business days before; the notice gives the date to pay or make an arrangement) and (b) (no shutoff while an appeal of the bill is pending)",
+              "Health and Safety Code § 116910(a) (no shutoff when a primary care provider certifies a serious threat to health, the customer can't pay in the normal billing cycle, and agrees to a payment plan) and (b) (the system offers a payment option; falling behind on it for 60 days or more can lead to a shutoff 5 business days after a posted final notice)",
+              "Health and Safety Code §§ 116902 and 116904 (covered water systems, including every community water system from August 1, 2024) and 116275(i) (a community water system: at least 15 service connections or 25 yearlong residents)"],
+  }),
+  // ---- consumer: debt collectors and car repossession ------------------------------------------------------------
+  spec({
+    id: "debt-validation",
+    family: "consumer",
+    title: "A debt collector's first letter (a validation notice)",
+    plain: "A collection agency's letter about a debt, with a date by which you can dispute it.",
+    confidence: "HEDGE",
+    anchor: null,
+    count: null,
+    hedge: "A debt collector's validation notice prints a date to dispute the debt by. Dispute in writing by that date if you can. If the notice reached you late, you may have until 30 days after you got it.",
+    must: /debt collect\w*|collection agency|collector|validation notice|\bcollections?\b/i,
+    // Not a lawsuit (court papers have their own deadline), and not a government agency collecting its own debt
+    // (the IRS, FTB, EDD, Social Security, child support, a county or court): the validation rules cover debt collectors.
+    not: /\b(su(e|ed|es|ing)|lawsuit|summons|court papers|complaint|served)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court|trash|garbage|recycling)\b/i,
+    detect: [/debt collect\w*|collection agency|collector/i, /validation|dispute|verif\w*/i, /\b(owe|balance|creditor|debt)\b/i],
+    spoken: /^(?!.*\b(su(e|ed|es|ing)|lawsuit|summons|court papers)\b).*(debt collect\w*|collection agency|\b(sent|went|gone|turned over) (\w+ ){0,3}to collections\b|\bcollections? (letter|notice|agency|company)\b|validation notice)/is,
+    answers: /\b(collect\w*|collector|debt)\b/i,
+    keyterms: ["debt collector", "collection agency", "validation notice"],
+    headline: "If you don't think you owe it, dispute it in writing by the date on the notice",
+    steps: [
+      "To dispute it, write to the collector by that date and say you dispute the debt and want proof. Keep a copy, and mail it in a way you can prove.",
+      "Once you dispute in writing in time, the collector has to stop collecting until it mails you proof of the debt.",
+      "If you're sued over the debt, you get court papers with their own deadline: use this tool again.",
+    ],
+    help: [LAWHELP, TWO11],
+    sources: ["15 U.S.C. § 1692g(a)(3)–(4) and (b) (dispute within 30 days after receiving the notice; after a written dispute, collection stops until the collector mails verification)",
+              "12 CFR 1006.34(b)(5) and (c) (the validation period ends 30 days after the consumer receives, or is assumed to receive, the notice, at least 5 days after it's sent, not counting weekends and federal holidays; the notice states that end date)"],
+  }),
+  spec({
+    id: "ca-repo-notice",
+    family: "consumer",
+    title: "California: a notice that your repossessed car will be sold (notice of intent to sell)",
+    plain: "The lender's notice, after a car bought on a dealer contract was repossessed, saying it will sell the car and how to get it back.",
+    confidence: "HEDGE",
+    anchor: "mailed",
+    dateLabel: "Date the notice was given to you or mailed",
+    dateQuestion: "What day was the notice mailed or handed to you? You can say something like September 13th.",
+    count: { days: 15, unit: "calendar", roll: "none" },
+    lead: "You can get the car back by paying off the contract, or sometimes by catching up on it, at least until {date}",
+    also: [{ label: "If you ask in writing before then, they have to add 10 more days, to {date} for a 15-day notice.", days: 25 }],
+    note: "This is for a car bought on a dealer's installment contract. If the notice was mailed from or to outside California, it's 20 days instead of 15, and 30 with the extension. The days count from when the notice was given or mailed, not from the repossession. I don't move the date for a weekend or holiday, so it's the safe date to act by.",
+    must: /repo(ssess\w*)?\b|intent to (sell|dispose)|redeem|reinstat\w*/i,
+    // A car on a dealer contract only (§ 2983.2): not furniture, a home, a storage unit, a pawn, or a license or benefits.
+    // Not after the sale: there's nothing to redeem then, and "you owe the difference" is a deficiency.
+    not: /\b(furniture|rent[- ]to[- ]own|appliances?|tv|television|house|home|trustee|storage|pawn|license|licence|medi-cal|benefits|sold|auction(ed)?|deficiency|owe the (difference|rest|balance))\b/i,
+    detect: [/repossess\w*|\brepo\b/i, /intent to (sell|dispose)|dispos\w*|\bsale\b/i, /redeem|reinstat\w*|vehicle|car\b|motor vehicle/i],
+    spoken: /\brepo(ssess\w*)?\b/i,
+    answers: /\b(repo\w*|car|vehicle|truck)\b/i,
+    keyterms: ["repossession", "notice of intent to sell", "reinstate"],
+    headline: "Call the lender, and ask in writing for the 10-day extension if you need more time",
+    steps: [
+      "Read the notice: it says what you'd have to pay to get the car back, and whether you can catch up (reinstate) instead of paying it all.",
+      "If you need more time, ask in writing for the 10-day extension before this date, using the form that came with the notice.",
+      "Even after this date, until the car is sold, ask the lender whether you can still get it back. And ask how to get your personal things out of it.",
+    ],
+    help: [LAWHELP, TWO11],
+    sources: ["Civil Code § 2983.2(a) (at least 15 days' written notice before a repossessed car is sold; the right to redeem, and any right to reinstate, until 15 days from giving or mailing the notice, 20 if mailed from or to outside California; 10 more days on written request)"],
+  }),
+  // ---- housing: a housing authority ending a voucher or a public housing lease -------------------------------------
+  spec({
+    id: "hud-voucher-termination",
+    family: "housing",
+    title: "A housing authority notice ending your Section 8 voucher (housing choice voucher)",
+    plain: "A letter from the housing authority saying it will stop your voucher's rent payments, with your right to an informal hearing.",
+    confidence: "HEDGE",
+    anchor: null,
+    count: null,
+    hedge: "When a housing authority ends your voucher because of something your family did or didn't do, or because you were away too long, the notice has to say why and give the deadline to ask for an informal hearing.",
+    must: /housing authority|\bPHA\b|housing choice voucher|section 8|\bvoucher\b/i,
+    not: /\b(landlord|owner)\b/i,
+    detect: [/housing authority|\bPHA\b/i, /housing choice voucher|section 8|\bvoucher\b|housing assistance/i, /terminat\w*|informal hearing|end\w*|stop\w*/i],
+    spoken: /^(?!.*\b(landlord|owner)\b)(?=.*\b(housing authority|pha|section 8|section eight|voucher)\b)(?=.*\b(terminat\w*|kick\w* (me )?off|losing|lose|taking (away )?my|ending|end|stop\w*|cut\w* off|kick\w* me off)\b)/is,
+    answers: /\b(voucher|section 8|section eight|housing authority)\b/i,
+    keyterms: ["housing authority", "informal hearing", "housing choice voucher"],
+    headline: "Ask the housing authority for an informal hearing by the date on the notice",
+    steps: [
+      "Ask for the informal hearing right away, in writing if you can, and keep a copy. If the notice gives no deadline, or it looks wrong, get help right away.",
+      "For most reasons, the housing authority has to give you the chance for a hearing before it stops paying your rent share.",
+      "Keep paying your part of the rent while you wait, and ask legal aid to help you prepare.",
+    ],
+    help: [LSNC, LAWHELP, TWO11],
+    sources: ["24 CFR 982.555(a)(1)(iv)–(v) and (a)(2) (an informal hearing before the housing authority stops payments for a family's action or absence) and (c)(2) (the notice gives the reasons and the deadline to ask)"],
+  }),
+  spec({
+    id: "hud-public-housing",
+    family: "housing",
+    title: "Public housing: a notice ending your lease",
+    plain: "A housing authority's written notice ending a public housing lease, for example for unpaid rent.",
+    confidence: "HEDGE",
+    anchor: "notice",
+    dateLabel: "Date printed on the notice",
+    dateQuestion: "What date is printed on the lease termination notice? You can say something like September 13th.",
+    count: { days: 30, unit: "calendar", roll: "none" },
+    lead: "For unpaid rent, your public housing lease can't end before {date}",
+    note: "This counts from the date on the notice, the earliest start. For some other reasons, such as a threat to others' safety or criminal activity, the notice can be shorter.",
+    must: /public housing/i,
+    detect: [/public housing/i, /housing authority|\bPHA\b/i, /terminat\w*|evict\w*|grievance|vacate|end\w* (your |the )?lease/i],
+    spoken: /^(?=.*\bpublic housing\b)(?=.*\b(evict\w*|terminat\w*|kick\w* (me )?out|end\w* (my |the )?lease|lease (is )?end\w*|move out)\b)/is,
+    answers: /\bpublic housing\b/i,
+    keyterms: ["public housing", "grievance hearing", "lease termination"],
+    headline: "Ask about a grievance hearing, and get free legal help",
+    steps: [
+      "The notice has to say why, and tell you about your right to reply, to see the housing authority's papers about it, and, if it applies, to ask for a grievance hearing. Ask for that in writing right away.",
+      "This notice isn't an eviction order. To evict you, the housing authority has to go to court, and you'll get court papers you can answer.",
+      "If it's about rent, ask whether a hardship exemption or a rent recalculation applies.",
+    ],
+    help: [LSNC, LAWHELP, TWO11],
+    sources: ["24 CFR 966.4(l)(3)(i) (a public housing lease termination notice: at least 30 days for unpaid rent; shorter for threats to health or safety, drug-related or violent criminal activity, or a felony) and (l)(3)(ii) (the notice states the grounds and the tenant's rights, including a grievance hearing when it applies)"],
+  }),
   // ---- taxes: the IRS -------------------------------------------------------------------------------------------
   spec({
     id: "irs-deficiency",
@@ -622,12 +985,41 @@ export const RULES = [
     sources: ["IRS Tax Topic 652, Notice of underreported income, CP2000 (respond within 30 days of the date of the notice, 60 if outside the U.S.; otherwise a statutory notice of deficiency)",
               "IRS, Understanding your CP2000 notice (reply by the date listed; you can ask for more time)"],
   }),
+  spec({
+    id: "ca-ftb-npa",
+    family: "tax",
+    title: "California Franchise Tax Board: a Notice of Proposed Assessment",
+    plain: "A letter from California's Franchise Tax Board saying you owe more state income tax, and that you can protest it.",
+    anchor: "mailed",
+    dateLabel: "Date the notice was mailed (printed on it)",
+    count: { days: 60, unit: "calendar", roll: "none" },
+    must: /franchise tax board|\bFTB\b/i,
+    not: /\b(lev(y|ies|ied|ying)|garnish\w*|final notice|balance due|collection\w*|order to withhold|withholding order|refund\w*)\b/i,
+    detect: [/franchise tax board|\bFTB\b/i, /proposed (deficiency )?assessment|\bNPA\b/i, /\bprotest\b|\b(60|sixty) days/i],
+    spoken: /^(?!.*\b(lev(y|ies|ied|ying)|garnish\w*|final notice|balance due|collection\w*|refund\w*|bill|wages?|bank)\b)(?=.*\b(franchise tax( board)?|ftb)\b|(?!.*\b(irs|internal revenue)\b).*\b(state tax(es)?|california tax(es)?)\b)(?=.*\b(proposed assessment|assessment|owe|protest|more tax)\b)/is,
+    answers: /\b(franchise|ftb|state|california)\b/i,
+    keyterms: ["Franchise Tax Board", "Notice of Proposed Assessment", "protest"],
+    headline: "File a written protest with the Franchise Tax Board",
+    steps: [
+      "Protest in writing by this date, and say why you disagree. The notice also prints the last day to protest, and a protest filed by that date counts as on time.",
+      "If you don't protest in time, the proposed amount becomes final.",
+      "Get help if you can: some Low Income Taxpayer Clinics help with California tax too, free or low cost if you qualify. Ask when you call.",
+    ],
+    help: [LITC, LAWHELP, TWO11],
+    sources: ["Revenue and Taxation Code § 19041(a) (a written protest within 60 days after the notice is mailed) and (b) (a protest by the last date the notice specifies is timely)",
+              "Revenue and Taxation Code § 19042 (with no protest, the assessment becomes final when the 60 days end)"],
+  }),
 ];
+
+// The Social Security rules never claim another program's disability letter when Social Security isn't named:
+// EDD or state disability (SDI), workers' comp (WCAB), the VA, or long-term disability insurance through work.
+const NOT_SSA = /^(?!.*\b(social security|SSA|SSI|SSDI)\b).*\b(EDD|employment development|state disability|SDI|workers'? ?comp\w*|WCAB|VA|veterans?|long[- ]term disability|disability insurance (through|from) (work|my job|my employer)|private disability)\b/is;
+for (const r of RULES) if (r.family === "ssa") r.not = r.not ? new RegExp(`${r.not.source}|${NOT_SSA.source}`, "is") : NOT_SSA;
 
 // The spoken detector tries rules in this order: most specific first ("a jury summons" before "summons").
 export const SPOKEN_ORDER = ["jury-summons", "ca-ud", "ca-civil-summons", "ca-3day", "ca-medi-cal-plan", "ca-medi-cal-plan-denial",
-  "ca-noa", "ssa-overpayment", "ssa-recon", "ssa-initial", "ca-edd-determination", "ca-parking-review", "ca-parking-delinquent", "ca-parking-ticket",
-  "irs-deficiency", "irs-levy", "irs-cp2000", "ca-60day-notice", "ca-30day-notice", "ca-rent-increase"];
+  "ca-noa", "ca-edd-sdi", "ssa-overpayment", "ssa-benefits-ending", "ssa-appeals-council", "ssa-recon", "ssa-initial", "ca-edd-determination", "ca-parking-review", "ca-parking-delinquent", "ca-parking-ticket", "ca-dmv-aps", "ca-traffic-ticket",
+  "ca-ftb-npa", "irs-deficiency", "irs-levy", "irs-cp2000", "hud-public-housing", "hud-voucher-termination", "ca-sheriff-vacate", "ca-subsidy-end", "ca-water-shutoff", "ca-utility-shutoff", "ca-repo-notice", "debt-validation", "ca-60day-notice", "ca-30day-notice", "ca-rent-increase"];
 
 // Words that could mean more than one kind of letter. The line asks which, then matches the answer among
 // the candidates' `answers`.
@@ -650,7 +1042,8 @@ export function detect(text) {
     if ((r.must && !r.must.test(text)) || (r.not && r.not.test(text))) continue;
     const score = r.detect.reduce((n, re) => n + (re.test(text) ? 1 : 0), 0);
     // "reconsideration" appears in both SSA letters: a reconsideration DETERMINATION offers a hearing.
-    const bonus = r.id === "ssa-recon" && /(request (for )?(a )?hearing|administrative law judge)/i.test(text) ? 2 : 0;
+    // Only between the two SSA letters: without "reconsideration", a hearing offer (the DMV's, a county's) isn't SSA's.
+    const bonus = r.id === "ssa-recon" && /reconsideration/i.test(text) && /(request (for )?(a )?hearing|administrative law judge)/i.test(text) ? 2 : 0;
     if (score + bonus > bestScore) { best = r; bestScore = score + bonus; }
   }
   return bestScore >= 2 ? best : null;
