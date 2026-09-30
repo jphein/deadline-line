@@ -5,7 +5,7 @@
 For people without a smartphone, a data plan or the energy to read one more letter. The Deadline Line is a voice agent you reach by phone (or in the browser): describe your letter in your own words ("I got a letter from Social Security dated September 13th, they denied my disability again") and it answers with the exact deadline, how many days are left, what to do first and where to get free legal help. Then, if you ask, it explains how it counted.
 
 - **Speech-to-text:** [AssemblyAI Universal-Streaming](https://www.assemblyai.com/docs/speech-to-text/universal-streaming) (v3 WebSocket), with key-term prompting for benefits and eviction vocabulary. 8 kHz from the phone, 16 kHz from the browser.
-- **Deadline rules:** the Deadline Decoder MCP server, vendored in [`vendor/deadline-decoder-mcp/`](vendor/deadline-decoder-mcp/): tested code with cited sources for each kind of letter (Social Security denials, California housing notices and eviction papers, other court papers, jury summonses, Medi-Cal/CalFresh notices, and more on this branch). **The AI never computes a date.** When the words fit more than one kind ("I got a summons"), the line asks which; when a notice sets its own date, the line says so and points to it.
+- **Deadline rules:** the Deadline Decoder MCP server, vendored in [`vendor/deadline-decoder-mcp/`](vendor/deadline-decoder-mcp/): tested code with cited sources for each kind of letter. On this branch that's twenty kinds: Social Security denials and overpayments; California 3-, 30- and 60-day notices, rent increases and eviction papers; other court papers and jury summonses; parking tickets; EDD unemployment notices; Medi-Cal, CalFresh and CalWORKs notices and Medi-Cal health plan decisions; and IRS letters (a CP2000, a Notice of Deficiency, a notice of intent to levy). **The AI never computes a date.** When the words fit more than one kind ("I got a summons"), the line asks which; when a notice sets its own date, the line says so and points to it.
 - **Voice:** a local neural voice (Piper over the Wyoming protocol) or espeak-ng.
 - **Phone:** runs on the project's own Asterisk, through its AudioSocket. Each call is a TCP stream of 8 kHz audio frames into this bridge.
 - **Browser demo on Cloudflare Workers (or Vercel):** the page talks to AssemblyAI directly with a temporary token, and gets each reply from a serverless function that runs the same dialog over the same rules (below). Run locally, the browser demo goes through this server instead.
@@ -16,7 +16,7 @@ Hear it: [`docs/sample-call.ogg`](docs/sample-call.ogg), a real SIP call to the 
 
 ```bash
 npm install
-npm test                                   # 59 tests, no keys needed (fake AssemblyAI, fake TTS)
+npm test                                   # 62 tests, no keys needed (fake AssemblyAI, fake TTS)
 ASSEMBLYAI_API_KEY=... TTS_WYOMING=host:10200 npm start
 #   web demo:    http://127.0.0.1:8770/   (hold a conversation with your mic, or type)
 #   AudioSocket: 127.0.0.1:9092           (for a local Asterisk)
