@@ -12,6 +12,14 @@ export const AAI_URL = process.env.AAI_STREAMING_URL || "wss://streaming.assembl
 // silence at close. The browser already posts 50 ms chunks, so those go straight through.
 export const CHUNK_MS = { min: 50, max: 1000 };
 
+/** The query for one streaming session: raw PCM16, formatted turns, key terms. The server's sessions and the
+ *  page's direct sessions on Vercel (src/vercel.js) both open with it. */
+export function streamingQuery(sampleRate, keyterms = []) {
+  const q = new URLSearchParams({ sample_rate: String(sampleRate), encoding: "pcm_s16le", format_turns: "true" });
+  if (keyterms.length) q.set("keyterms_prompt", JSON.stringify(keyterms));
+  return q;
+}
+
 export class AaiStream extends EventEmitter {
   /**
    * @param {{ apiKey?: string, sampleRate: number, url?: string, keyterms?: string[] }} opts
@@ -24,9 +32,7 @@ export class AaiStream extends EventEmitter {
     const bytes = (ms) => Math.round((sampleRate * 2 * ms) / 1000) & ~1;   // PCM16 mono: 2 bytes per sample
     this.chunk = { min: bytes(CHUNK_MS.min), max: bytes(CHUNK_MS.max) };
     this.buf = Buffer.alloc(0);
-    const q = new URLSearchParams({ sample_rate: String(sampleRate), encoding: "pcm_s16le", format_turns: "true" });
-    if (keyterms.length) q.set("keyterms_prompt", JSON.stringify(keyterms));
-    this.ws = new WebSocket(`${url}?${q}`, { headers: apiKey ? { Authorization: apiKey } : {} });
+    this.ws = new WebSocket(`${url}?${streamingQuery(sampleRate, keyterms)}`, { headers: apiKey ? { Authorization: apiKey } : {} });
     this.ready = false;
     this.ws.on("message", (data, isBinary) => {
       if (isBinary) return;
