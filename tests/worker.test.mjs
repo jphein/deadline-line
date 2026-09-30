@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import { router } from "../src/handlers.js";
+import { router, apiRoutes } from "../src/handlers.js";
 import worker from "../worker.js";
 
 const T = { timeout: 8000 };
@@ -54,6 +54,14 @@ test("worker.js: healthz says cloudflare-workers, decode answers, and token read
     assert.equal((await worker.fetch(at("/"), env)).status, 200);
     assert.deepEqual(env.ASSETS.seen, ["/"]);
   } finally { globalThis.fetch = saved; }
+});
+
+test("wrangler.toml: --env next is a second Worker, deadline-line-next, that says so in healthz", async () => {
+  const toml = await fs.readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
+  assert.match(toml, /^\[env\.next\]\nname = "deadline-line-next"$/m);
+  assert.match(toml, /^\[env\.next\.vars\]\nCHANNEL = "next"$/m);
+  const r = await router((env) => apiRoutes(env, "cloudflare-workers"))(at("/api/healthz"), { CHANNEL: "next", ASSETS: fakeAssets() });
+  assert.deepEqual(await r.json(), { ok: true, stt: "missing key", mode: "direct", platform: "cloudflare-workers", channel: "next" });
 });
 
 test("wrangler.toml: worker.js with public/ as the ASSETS binding, and no secret in it", async () => {

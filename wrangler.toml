@@ -12,3 +12,12 @@ binding = "ASSETS"
 
 [observability]
 enabled = true
+
+# A second Worker for trying the develop branch without touching the judged demo:
+#   npx wrangler secret put ASSEMBLYAI_API_KEY --env next   then   npx wrangler deploy --env next
+[env.next]
+name = "deadline-line-next"
+workers_dev = true
+
+[env.next.vars]
+CHANNEL = "next"
