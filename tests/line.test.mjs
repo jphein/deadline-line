@@ -332,7 +332,9 @@ test("dialog: a Social Security denial that mentions a hearing asks whether the 
 test("dialog: a request to repeat still repeats; 'denied me again' is heard as words", async () => {
   const mcp = await startMcp();
   try {
-    for (const ask of ["say that again", "can you repeat that", "pardon?", "come again?", "again", "one more time please", "what was that"]) {
+    for (const ask of ["say that again", "can you repeat that", "pardon?", "come again?", "again", "one more time please", "what was that",
+      "say again", "tell me again", "can you tell me that again", "read it again", "go over that again", "again, please", "what did you say",
+      "sorry, what?", "huh?", "what?"]) {
       const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
       const first = await d.handle("I got a jury summons in the mail");
       assert.equal((await d.handle(ask)).say, first.say, ask);
@@ -342,5 +344,10 @@ test("dialog: a request to repeat still repeats; 'denied me again' is heard as w
     assert.notEqual((await d.handle("yes, and social security denied me again")).say, jury.say);   // heard, not replayed
     const e = new Dialog(mcp.callTool, { today: "2026-09-30" });
     assert.doesNotMatch((await e.handle("social security denied my disability again")).say, /^Deadline Line\./);
+    // Words that sound like it but aren't a request: a denial again, "they said no again", "what" inside a sentence.
+    for (const x of ["they said no again", "social security turned me down again", "what do I do about my eviction papers"]) {
+      const f = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      assert.doesNotMatch((await f.handle(x)).say, /^Deadline Line\./, x);
+    }
   } finally { await mcp.close(); }
 });

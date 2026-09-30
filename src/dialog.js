@@ -4,8 +4,9 @@
 const YES = /\b(yes|yeah|yep|sure|ok|okay|please|go ahead|that's right|correct|right)\b/i;
 const NO = /\b(no|nope|nah|not now|no thanks|that's wrong|wrong)\b/i;
 const HOW = /\b(how|explain|counted|count|why)\b/i;
-// "Again" alone, or "say that again", is a request to repeat; "they denied me again" isn't.
-const REPEAT = /\b(repeat|say (that|it) again|what was that|pardon|come again|one more time)\b|^\W*again\W*$/i;
+// A request to repeat: "say (that) again", "tell me again", "read it again", "go over that again", "again, please",
+// "what did you say", "sorry, what?", or a bare "again", "huh" or "what". "They denied me again" isn't one.
+const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|\b(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
 const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";

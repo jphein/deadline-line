@@ -20,4 +20,10 @@ for f in src/server.js src/mcp.js src/decoder.js src/rules/dates.js src/rules/ru
   } > "$dest/$f"
 done
 cp "$src/LICENSE" "$dest/LICENSE"
+# The upstream files' own hashes, so a test can check the vendored copies still match them byte for byte
+# (tests/vendor.test.mjs strips the two header lines and re-hashes).
+{
+  echo "# jphein/deadline-decoder-mcp $branch @ $(git -C "$src" rev-parse HEAD)"
+  (cd "$src" && sha256sum src/server.js src/mcp.js src/decoder.js src/rules/dates.js src/rules/rules.js LICENSE)
+} > "$dest/UPSTREAM.sha256"
 echo "vendored jphein/deadline-decoder-mcp $branch @ $sha ($license) into vendor/deadline-decoder-mcp/"
