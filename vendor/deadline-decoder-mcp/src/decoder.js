@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 43ca02b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 2a67d99), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
@@ -162,7 +162,7 @@ function detectSpoken(text) {
 
 // What each family of letters is about, for "which kind is it?" (in this order, when the family has rules).
 const FAMILY_ASK = [["ssa", "Social Security"], ["housing", "your rent or your home"], ["court", "a court case or jury duty"],
-  ["traffic", "a parking ticket"], ["utilities", "a shutoff notice"], ["consumer", "a debt collector or a repossessed car"], ["unemployment", "unemployment benefits"], ["tax", "taxes or the IRS"], ["benefits", "Medi-Cal, CalFresh or CalWORKs"]];
+  ["traffic", "a traffic or parking ticket, or the DMV"], ["utilities", "a shutoff notice"], ["consumer", "a debt collector or a repossessed car"], ["unemployment", "unemployment benefits"], ["tax", "taxes or the IRS"], ["benefits", "Medi-Cal, CalFresh or CalWORKs"]];
 const families = new Set(RULES.map(r => r.family));
 const asked = FAMILY_ASK.filter(([f]) => families.has(f)).map(([, what]) => what);
 export const UNKNOWN_LETTER = `I couldn't tell which kind of letter that is. Is it about ${asked.slice(0, -1).join(", ")}, or ${asked.at(-1)}?`;
@@ -172,18 +172,31 @@ export const UNKNOWN_LETTER = `I couldn't tell which kind of letter that is. Is 
  *  that letter's date is ("the due date was August 1st" looks back for a bill counted from its due date). */
 export function detectLetter(text, today = todayIso(), among = [], { letterType } = {}) {
   if (typeof text !== "string") throw new DecoderError("text must be a string");
-  let rule = among.map(findRule).find(r => r.answers?.test(text)) ?? null;
+  // A question with its own answers (the hearing ask) is matched by those first, in order.
+  const asked = among.length ? AMBIGUOUS.find(g => g.answers && g.candidates.length === among.length && g.candidates.every(c => among.includes(c))) : null;
+  const heard = asked?.answers.find(([, re]) => re.test(text))?.[0];
+  let rule = heard ? findRule(heard) : among.map(findRule).find(r => r.answers?.test(text)) ?? null;
   if (!rule) {
     // A printed initial denial names "reconsideration" as the next step, so the printed detector
     // can't hear "denied *again*"; the spoken detector can, and wins in that one case.
     const printed = detect(text), spoken = detectSpoken(text);
     rule = printed?.id === "ssa-initial" && spoken?.id === "ssa-recon" ? spoken : (printed ?? spoken);
   }
-  const group = rule ? null : AMBIGUOUS.find(g => g.spoken.test(text));
+  // An answer to a question with its own answers that settles nothing ("I don't know") is asked again. (The older
+  // questions, whose candidates answer through their rules, keep falling through as before.)
+  // The hearing ask overrides the rules only when they picked one of its own letters, or nothing at all: another
+  // program's letter that mentions Social Security keeps its rule.
+  const pre = among.length ? null : AMBIGUOUS.find(g => g.preempt && (!rule || g.candidates.includes(rule.id))
+    && g.spoken.test(text) && !g.unless?.(text));
+  if (pre) rule = null;
+  const group = pre ?? (rule ? null : asked ?? AMBIGUOUS.find(g => !g.preempt && g.spoken.test(text)));
   // A letter's own date is never after today: a date ahead of today (or said as an event) isn't offered as it.
   const known = rule ?? (letterType ? findRule(letterType) : null);
   const all = [...findDates(text), ...findSpokenDates(text, today, { pastDue: known?.anchor === "due" })].sort((x, y) => x.at - y.at);
-  const past = all.filter(x => !x.ahead && x.iso <= today).map(x => x.iso);
+  // A bill's due date read back from today can land most of a year ago ("due December 1st", said in September): a
+  // shutoff notice comes weeks after the due date, not months, so that's asked again rather than taken.
+  const farBack = (isoStr) => known?.anchor === "due" && daysBetween(d(isoStr), d(today)) > 300;
+  const past = all.filter(x => !x.ahead && x.iso <= today && !farBack(x.iso)).map(x => x.iso);
   const dates = rule?.anchor === null ? [] : past;
   const ask = rule?.dateLabel ? (dates[0] ? `I see the date ${fmt(d(dates[0]))}. Is that the ${rule.dateLabel.toLowerCase()}?` : `What is the ${rule.dateLabel.toLowerCase()}?`) : "";
   return {

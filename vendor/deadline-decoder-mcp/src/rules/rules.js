@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 43ca02b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 2a67d99), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -107,7 +107,7 @@ export function spec(s) {
 export const RULES = [
   {
     id: "ssa-recon",
-    family: "ssa", confidence: "SOLID", anchor: "notice", not: /^(?!.*notice of reconsideration).*(hearing decision|\b(administrative law judge|ALJ) (found|decided|dismissed)|notice of decision)/is,
+    family: "ssa", confidence: "SOLID", anchor: "notice", not: /^(?!.*\b(reconsider\w*|denied|deny|denial|again|second time|twice|not disabled|unfavorable|turned (me )?down|said no|rejected|appeal\w*)\b)|^(?!.*notice of reconsideration).*(overpa(id|yment)|\b(unlawful detainer|eviction (summons|papers|notice|lawsuit|case)|(3|three)[- ]day notice|notice to (vacate|quit|pay rent))\b)|notice of decision|\b(administrative law judge|ALJ) (found|decided|dismissed)|\bjudge (ruled|decided|denied)\b|^(?!.*notice of reconsideration).*hearing decision/is,
     spoken: /\b(social security|ssi|ssdi|disability)\b.*\b(again|second time|twice)\b|\b(again|second time|twice)\b.*\b(social security|ssi|ssdi|disability)\b/i,
     answers: /\b(again|second|twice|reconsider\w*|hearing)\b/i,
     keyterms: ["Social Security", "reconsideration", "administrative law judge", "SSI", "disability"],
@@ -143,7 +143,7 @@ export const RULES = [
   },
   {
     id: "ssa-initial",
-    family: "ssa", confidence: "SOLID", anchor: "notice", not: /^(?!.*notice of reconsideration).*(hearing decision|\b(administrative law judge|ALJ) (found|decided|dismissed)|notice of decision)/is,
+    family: "ssa", confidence: "SOLID", anchor: "notice", not: /\b(administrative law judge|ALJ) (found|decided|dismissed)|\bjudge (ruled|decided|denied)\b|^(?!.*notice of reconsideration).*hearing decision/is,
     spoken: /\b(social security|ssi|ssdi)\b.*\b(denied|turned (me )?down|rejected|said no)\b|\b(denied|turned down|rejected)\b.*\b(social security|ssi|ssdi|disability)\b/i,
     answers: /\b(first|denied|application|turned down)\b/i,
     keyterms: ["Social Security", "SSI", "SSDI", "disability"],
@@ -357,7 +357,7 @@ export const RULES = [
     note: "I count 10 calendar days and don't extend it for a weekend or holiday, so this is the safe date to go by.",
     // An admin per se order after a DUI arrest only: not a suspension for unpaid tickets, a failure to appear,
     // points, or no insurance, which have their own rules.
-    must: /admin(istrative)? per se|\bAPS\b|pink (notice|paper|slip)|\b(DUI|driving under the influence|blood alcohol|chemical test|breath(alyzer)? test|refus\w* (the |a )?test)\b/i,
+    must: /admin(istrative)? per se|\bAPS\b|pink (notice|paper|slip)|\b(DUI|driving under the influence|blood alcohol|chemical test|breath(alyzer)? test|breathalyzer|refus\w* (the |a |to take (the |a )?)?(test|breath\w*|blood test|chemical test))\b/i,
     not: /unpaid (tickets?|fines?)|fail(ed|ure) to appear|\bFTA\b|\bpoints\b|negligent operator|\binsurance\b|financial responsibility|child support|\bregistration\b/i,
     detect: [/\b(DMV|department of motor vehicles|driver safety)\b/i, /suspen\w*|revo\w*|admin(istrative)? per se/i, /\b(DUI|driving under the influence|blood alcohol|chemical test|hearing)\b/i],
     spoken: /admin(istrative)? per se|pink (notice|paper|slip)|^(?=.*\b(dmv|license|licence)\b)(?=.*\b(dui|drunk|blood alcohol|breath(alyzer)? test|refused (the )?test)\b)/is,
@@ -484,7 +484,7 @@ export const RULES = [
     mailWho: "Social Security",
     must: /appeals council|hearing decision|administrative law judge|\bALJ\b/i,
     detect: [/appeals council/i, /\b(hearing decision|administrative law judge|unfavorable|dismiss\w*)\b/i, /social security|supplemental security income|\bSSI\b/i],
-    spoken: /\bappeals council\b|^(?=.*\b(social security|ssi|ssdi|disability)\b)(?=.*\b(judge|hearing|alj)\b)(?=.*\b(denied|lost|unfavorable|said no|against me|dismiss\w*)\b)/is,
+    spoken: /\bappeals council\b|^(?=.*\b(social security|ssi|ssdi|disability)\b)(?=.*\b(judge|hearing|alj)\b)(?=.*\b(denied|lost|unfavorable|said no|turned (me )?down|against me|dismiss\w*)\b)/is,
     answers: /\b(judge|hearing|appeals council|decision)\b/i,
     keyterms: ["Appeals Council", "hearing decision"],
     headline: "Ask the Appeals Council to review the decision",
@@ -565,7 +565,7 @@ export const RULES = [
     must: /\b(disability insurance|state disability|SDI|paid family leave|PFL|DE 2517|DE 2514|DE 8517)\b/i,
     not: /\bunemployment\b|DE 1000M/i,
     detect: [/\bEDD\b|employment development department/i, /\b(disability insurance|state disability|SDI|paid family leave|PFL)\b/i, /notice of determination|DE 2517|DE 2514|DE 8517|not eligible|ineligible|disqualif|\bappeal\b/i],
-    spoken: /^(?=.*\b(sdi|state disability|disability insurance|paid family leave|pfl|family leave)\b|.*\bedd\b.*\bdisability\b|.*\bdisability\b.*\bedd\b)(?=.*\b(denied|not eligible|ineligible|disqualif\w*|stopped|cut off|turned (me )?down|determination)\b)(?!.*\b(social security|ssi|ssdi|unemployment)\b)/is,
+    spoken: /^(?=.*\b(sdi|state disability|disability insurance|paid family leave|pfl|family leave)\b|.*\bedd\b.*\bdisability\b|.*\bdisability\b.*\bedd\b)(?=.*\b(denied|not eligible|ineligible|disqualif\w*|stopped|cut off|turned (me )?down|determination)\b)(?!.*\bunemployment\b)(?!(?:(?!\bedd\b|employment development).)*\b(social security|ssi|ssdi)\b)/is,
     answers: /\b(sdi|state disability|disability insurance|paid family leave|pfl|family leave)\b/i,
     keyterms: ["State Disability Insurance", "SDI", "Paid Family Leave"],
     note: "EDD counts the 30 days from the date the notice was issued.",
@@ -759,7 +759,7 @@ export const RULES = [
     // A nonpayment disconnection by a private energy company only: not a landlord (Civil Code § 789.3), not a
     // safety outage, not a city or district utility or propane (§ 779.1 doesn't cover them), not a past-due bill.
     must: /shut ?off|shut\w* (it |my \w+ )?off|disconnect\w*|terminat\w* (of )?(your )?service|turn\w* off|cut\w* off/i,
-    not: /\b(landlord|owner|manager|PSPS|public safety|fire weather|wildfire|outage|propane|butane|SMUD|LADWP|municipal|utility district|irrigation district|department of water and power)\b|\bcity of [a-z]+( [a-z]+){0,2} (utilities|electric|light|power)\b|\bcity (utilities|electric|light and power)\b|\bhousing authority\b|\bwater (service|bill|system|company|district|department|account)\b/i,
+    not: /\b(landlord|owner|manager|PSPS|public safety|fire weather|wildfire|outage|propane|butane|SMUD|LADWP|municipal|utility district|irrigation district|department of water and power)\b|\bcity of [a-z]+( [a-z]+){0,2} (public utilities|utilities|electric( department| utility)?|light (and|&) power)\b|\bcity (utilities|electric|light and power)\b|\bwater (and|&) power\b|\bhousing authority\b|\bwater (service|bill|system|company|district|department|account)\b/i,
     detect: [/PG&E|pacific gas|edison|socalgas|SDG&E|\b(electric\w*|gas|energy|power)\b/i, /shut ?off|disconnect\w*|terminat\w*|48[- ]hour|turn\w* off|cut\w* off/i, /\b(notice|pay|payment|arrangement|balance|past due)\b/i],
     spoken: /^(?=.*\b(pg&e|pg and e|pge|edison|socalgas|sdg&e|electric\w*|power|gas|lights|utility|utilities)\b)(?=.*\b(shut\w* off|shutoff|disconnect\w*|turn\w* off|cut\w* off)\b)/is,
     answers: /\b(power|electric\w*|gas|pg&e|pge|edison|utility)\b/i,
@@ -1012,9 +1012,15 @@ export const RULES = [
 ];
 
 // The Social Security rules never claim another program's disability letter when Social Security isn't named:
-// EDD or state disability (SDI), workers' comp (WCAB), the VA, or long-term disability insurance through work.
-const NOT_SSA = /^(?!.*\b(social security|SSA|SSI|SSDI)\b).*\b(EDD|employment development|state disability|SDI|workers'? ?comp\w*|WCAB|VA|veterans?|long[- ]term disability|disability insurance (through|from) (work|my job|my employer)|private disability)\b/is;
-for (const r of RULES) if (r.family === "ssa") r.not = r.not ? new RegExp(`${r.not.source}|${NOT_SSA.source}`, "is") : NOT_SSA;
+// EDD or state disability (SDI), workers' comp (WCAB), veterans' benefits, or long-term disability through work.
+const NOT_SSA = /^(?!.*\b(social security|SSA|SSI|SSDI)\b).*\b(EDD|employment development|state disability|SDI|workers'? ?comp\w*|WCAB|veterans?|long[- ]term disability|disability insurance (through|from) (work|my job|my employer)|private disability|accommodation|workplace|at work|my job|my employer)\b/is;
+// The VA in capitals, or "the va" as ASR writes it; a bare "Va." (Virginia) or Spanish "va" isn't it.
+const NOT_SSA_VA = /^(?![\s\S]*\b([Ss]ocial [Ss]ecurity|SOCIAL SECURITY|SSA|SSI|SSDI)\b)[\s\S]*(\bVA\b|\b[Tt]he [Vv][Aa]\b(?!\.))/;
+// A sentence that leads with EDD is EDD's, even when it mentions Social Security later ("EDD denied my disability,
+// I'm also on social security").
+const EDD_FIRST = /^(?:(?!\b(?:social security|SSA|SSI|SSDI)\b).)*\b(EDD|employment development)\b/is;
+const anyOf = (...res) => ({ test: (t) => res.some(re => re?.test(t)) });
+for (const r of RULES) if (r.family === "ssa") r.not = anyOf(r.not, NOT_SSA, NOT_SSA_VA, EDD_FIRST);
 
 // The spoken detector tries rules in this order: most specific first ("a jury summons" before "summons").
 export const SPOKEN_ORDER = ["jury-summons", "ca-ud", "ca-civil-summons", "ca-3day", "ca-medi-cal-plan", "ca-medi-cal-plan-denial",
@@ -1024,6 +1030,24 @@ export const SPOKEN_ORDER = ["jury-summons", "ca-ud", "ca-civil-summons", "ca-3d
 // Words that could mean more than one kind of letter. The line asks which, then matches the answer among
 // the candidates' `answers`.
 export const AMBIGUOUS = [
+  // A Social Security denial that mentions a hearing, with no decision in it: before the hearing it's a
+  // reconsideration's step (ask for a hearing), after it the Appeals Council's. Both give 60 days plus 5; only the
+  // step differs, and tense is hard to hear, so the line asks. `preempt`: it can override the rules' pick, but only
+  // when that pick is one of its candidates or nothing matched.
+  // `unless`: not when the reconsideration rule's own exclusions fire (a judge's decision, a Notice of Decision,
+  // another program), not on a Notice of Reconsideration or an initial denial, which say which letter they are.
+  { preempt: true,
+    // Social Security (or a disability judge that isn't about a job), a hearing, and an outcome or appeal word: a
+    // custody, immigration or criminal hearing from a caller on SSI isn't asked.
+    spoken: /^(?=.*\b(social security|SSA|SSI|SSDI)\b|(?!.*\b(accommodation|at work|my job|employer)\b)(.*\bdisability\b.*\b(judge|ALJ)\b|.*\b(judge|ALJ)\b.*\bdisability\b))(?=.*\bhearings?\b)(?=.*\b(denied|deny|turned (me )?down|said no|lost|against me|unfavorable|reconsider\w*|appeal\w*|judge|ALJ)\b)/is,
+    unless: (t) => RULES.find(r => r.id === "ssa-recon").not.test(t) || /notice of reconsideration|notice of disapproved claim|\b(initial|first) (determination|denial|decision)\b|(ask|request)( for)? (a )?reconsideration/i.test(t),
+    candidates: ["ssa-recon", "ssa-appeals-council"],
+    question: "Have you already had your Social Security hearing with a judge?",
+    // Tried in order, before each rule's own `answers`: a "not yet" first, so "no, I haven't had it" isn't read as "had it".
+    // "Not yet" yields to an outcome or a hearing already had ("no, the judge ruled against me"; "I had it but I haven't
+    // heard back"): those are past the hearing.
+    answers: [["ssa-recon", /^(?!.*\b(ruled|lost|against me|said no|turned (me )?down|(?<!(haven'?t|have not|hasn'?t|has not|didn'?t|not yet) )had (it|my hearing|the hearing)|heard back|went|the decision)\b)(\W*(no|nope|not yet)\b|.*\b(not yet|haven'?t|have not|hasn'?t|has not|scheduled|set for|coming( up)?|waiting|next (week|month))\b)/is],
+              ["ssa-appeals-council", /^\W*(yes|yeah|yep|i did)\b|\b(already|had it|had (my|the) hearing|went to (it|the hearing|my hearing)|the judge|lost|ruled|it was|heard back|went|the decision)\b/i]] },
   { spoken: /\bsummons\b|\bcourt papers\b/i, candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
     question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
   { spoken: /notice to (vacate|move out|terminate)|terminat\w* (of )?(my |the )?tenancy|move[- ]out notice|telling me to move out/i, candidates: ["ca-30day-notice", "ca-60day-notice"],
