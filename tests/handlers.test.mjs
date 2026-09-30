@@ -40,6 +40,12 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["I got court papers", "a debt collector, about money", "September 21st", "how did you count?", "no thanks"],
       ["I got a jury summons", "yes", "My landlord taped a three day notice on my door yesterday."],
       ["I got a summons", "I don't know", "it's from my landlord", "the 22nd of September"],
+      ["I got a letter from the IRS", "the notice of deficiency", "it was mailed September 15th", "how did you count?", "no"],
+      ["my landlord says my rent is going up, the notice was handed to me on September 15th", "yes"],
+      ["Social Security says they overpaid me, the letter is dated September 13th", "no thanks"],
+      ["I got a parking ticket on September 20th", "explain", "no"],
+      ["EDD says I'm not eligible for unemployment, the notice was mailed September 10th", "bye"],
+      ["I got a notice to vacate", "sixty days", "September 1st"],
     ];
     for (const turns of scripts) {
       const phone = new Dialog(mcp.callTool, { today: TODAY }), expected = [];

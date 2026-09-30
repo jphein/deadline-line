@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 9e46772), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 6a87918), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
@@ -67,12 +67,19 @@ export function computeDeadline(letterType, noticeDate, today = todayIso()) {
   };
   if (!r.deadline) {
     const lead = r.hedge;
-    return { ...common, deadline: null, deadline_spoken: null, days_left: null, passed: false, lead_spoken: lead,
+    return { ...common, deadline: null, deadline_spoken: null, days_left: null, passed: false, lead_spoken: lead, also: [], also_spoken: null,
       speech: [lead, `${r.headline}.`, `First step: ${r.steps[0]}`, help, "This is general information, not legal advice."].join(" ") };
   }
   const daysLeft = daysBetween(now, r.deadline);
   const late = daysLeft < 0, hedged = rule.confidence === "HEDGE";
-  const lead = hedged
+  const also = (r.also ?? []).map(a => a.deadline
+    ? { label: a.label, confidence: a.confidence, date: iso(a.deadline), date_spoken: fmt(a.deadline), passed: daysBetween(now, a.deadline) < 0 }
+    : { label: a.label, confidence: a.confidence, date: null, date_spoken: null, passed: false });
+  const alsoSpoken = also.map(a => (a.date ? a.label.replace("{date}", a.date_spoken) : a.label) + (a.passed ? " That date has passed." : "")).join(" ");
+  // A notice that sets the earliest date something can happen (a tenancy ending, a rent increase) says so in its own words.
+  const lead = rule.lead
+    ? `${rule.lead.replace("{date}", fmt(r.deadline))}, ${daysPhrase(daysLeft).replace(" — it has passed", "")}.${late ? " That date has passed." : ""}`
+    : hedged
     ? `For this kind of notice the deadline is usually ${fmt(r.deadline)}, ${daysPhrase(daysLeft)}. Check the notice itself: if it gives a different date, go by the notice.`
     : late
       ? `The deadline was ${fmt(r.deadline)}, ${daysPhrase(daysLeft)}. It may not be too late: ask for more time in writing and explain why, and call free legal aid today.`
@@ -80,6 +87,7 @@ export function computeDeadline(letterType, noticeDate, today = todayIso()) {
   const speech = [
     lead,
     `${r.headline}.`,
+    ...(alsoSpoken ? [alsoSpoken] : []),
     `Here's how I counted. ${r.math.map(forTheEar).join(" ")}`,
     `First step: ${r.steps[0]}`,
     help,
@@ -92,6 +100,8 @@ export function computeDeadline(letterType, noticeDate, today = todayIso()) {
     days_left: daysLeft,
     passed: late,
     lead_spoken: lead,
+    also,
+    also_spoken: alsoSpoken || null,
     speech,
   };
 }
@@ -128,12 +138,12 @@ function detectSpoken(text) {
   return null;
 }
 
-// Who sends each family of letters, for "which kind is it?" (in this order, when the family has rules).
-const FAMILY_ASK = [["ssa", "Social Security"], ["housing", "a landlord"], ["court", "a court"],
-  ["benefits", "the county about Medi-Cal, CalFresh or CalWORKs"]];
+// What each family of letters is about, for "which kind is it?" (in this order, when the family has rules).
+const FAMILY_ASK = [["ssa", "Social Security"], ["housing", "your rent or your home"], ["court", "a court case or jury duty"],
+  ["traffic", "a parking ticket"], ["unemployment", "unemployment benefits"], ["tax", "taxes or the IRS"], ["benefits", "Medi-Cal, CalFresh or CalWORKs"]];
 const families = new Set(RULES.map(r => r.family));
-const asked = FAMILY_ASK.filter(([f]) => families.has(f)).map(([, who]) => who);
-export const UNKNOWN_LETTER = `I couldn't tell which kind of letter that is. Is it from ${asked.slice(0, -1).join(", ")}, or ${asked.at(-1)}?`;
+const asked = FAMILY_ASK.filter(([f]) => families.has(f)).map(([, what]) => what);
+export const UNKNOWN_LETTER = `I couldn't tell which kind of letter that is. Is it about ${asked.slice(0, -1).join(", ")}, or ${asked.at(-1)}?`;
 
 /** Which kind of letter is this? `among`: the candidate ids from a "which one?" question, to match the answer to. */
 export function detectLetter(text, today = todayIso(), among = []) {

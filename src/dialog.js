@@ -101,7 +101,9 @@ export class Dialog {
         ? `That deadline was ${r.deadline_spoken}. It may not be too late: ask for more time in writing, and call free legal aid today.`
         : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
     const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
-    return this.say(`${head} ${r.what_to_do}. First step: ${r.next_steps[0]} For free help, ${r.free_help[0].name}. ${next}`);
+    // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
+    const also = r.also_spoken ? ` ${r.also_spoken}` : "";
+    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} For free help, ${r.free_help[0].name}. ${next}`);
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
