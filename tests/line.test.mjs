@@ -445,6 +445,17 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
   } finally { await mcp.close(); }
 });
 
+test("dialog: small claims papers from a debt collector get the small-claims answer, not the validation notice's", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const a = await d.handle("I got small claims papers from a debt collector");
+    assert.equal(d.letter, "ca-small-claims");
+    assert.match(a.say, /small claims/i);
+    assert.doesNotMatch(a.say, /validation notice/i);
+  } finally { await mcp.close(); }
+});
+
 test("dialog: restore() takes the HOA flag only as a real true (a tampered snapshot doesn't bring the step)", async () => {
   const mcp = await startMcp();
   try {
