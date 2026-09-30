@@ -156,10 +156,15 @@ async function startDirect() {
       else $("partial").textContent = m.transcript;
     } else if (m.error) line("error", "speech-to-text: " + m.error);
   };
-  stt.onclose = (e) => {                                // AssemblyAI ended the session: time's up, or an error
+  stt.onclose = (e) => {
     call.stt = null;
+    if (!call.began) {                                  // never connected (a firewall, a refused token): typing still works
+      call.limits = null;
+      line("error", "Couldn't start speech-to-text" + (e.reason ? ` (${e.reason})` : "") + ". You can type instead.");
+      return setState("listening", "Type below");
+    }
     if (e.code !== 1000 && e.reason) line("error", "speech-to-text: " + e.reason);
-    hangUp(call, t.messages.sessionEnd);
+    hangUp(call, t.messages.sessionEnd);                // AssemblyAI ended the session: time's up, or an error
   };
   // Half duplex, like the phone line: while the line talks, the mic sends silence, so its own voice
   // (the browser's speech often bypasses echo cancellation) isn't heard as the caller.
