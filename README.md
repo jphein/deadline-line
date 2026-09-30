@@ -7,7 +7,8 @@ For people without a smartphone, a data plan or the energy to read one more lett
 - **Speech-to-text:** [AssemblyAI Universal-Streaming](https://www.assemblyai.com/docs/speech-to-text/universal-streaming) (v3 WebSocket), with key-term prompting for benefits and eviction vocabulary. 8 kHz from the phone, 16 kHz from the browser.
 - **Deadline rules:** the Deadline Decoder MCP server, vendored in [`vendor/deadline-decoder-mcp/`](vendor/deadline-decoder-mcp/): tested code citing 20 CFR 404.933, CCP §§ 1161 and 1167, and W&I Code § 10951. **The AI never computes a date.**
 - **Voice:** a local neural voice (Piper over the Wyoming protocol) or espeak-ng.
-- **Phone:** Asterisk's AudioSocket. Each call is a TCP stream of 8 kHz audio frames into this bridge.
+- **Phone:** runs on the project's own Asterisk, through its AudioSocket. Each call is a TCP stream of 8 kHz audio frames into this bridge.
+- **Browser demo on Vercel:** the page talks to AssemblyAI directly with a temporary token, and gets each reply from a serverless function that runs the same dialog over the same rules (below). Run locally, the browser demo goes through this server instead.
 
 Hear it: [`docs/sample-call.ogg`](docs/sample-call.ogg), a real SIP call to the demo Asterisk (the caller's words were scripted for the rehearsal; the answer and the voice are real).
 
@@ -15,7 +16,7 @@ Hear it: [`docs/sample-call.ogg`](docs/sample-call.ogg), a real SIP call to the 
 
 ```bash
 npm install
-npm test                                   # 10 tests, no keys needed (fake AssemblyAI, fake TTS)
+npm test                                   # 49 tests, no keys needed (fake AssemblyAI, fake TTS)
 ASSEMBLYAI_API_KEY=... TTS_WYOMING=host:10200 npm start
 #   web demo:    http://127.0.0.1:8770/   (hold a conversation with your mic, or type)
 #   AudioSocket: 127.0.0.1:9092           (for a local Asterisk)
@@ -34,6 +35,16 @@ Rehearse without an AssemblyAI key: `node tests/fake-aai-server.mjs` and start t
 
 Connecting a real PBX is deliberately out of scope for the demo: see [docs/PBX-INTEGRATION.md](docs/PBX-INTEGRATION.md).
 
+## Deploy on Vercel (free)
+The browser demo runs on Vercel's free Hobby plan, with no other paid service. A Vercel function can't keep the audio WebSocket open for a whole call, so on Vercel the page streams the microphone straight to AssemblyAI with a short-lived token from [`api/token.js`](api/token.js) (the API key stays in the function). It posts each final transcript to [`api/decode.js`](api/decode.js), which runs the same dialog and the same vendored rules as the phone line, and speaks the reply in the browser's own voice. The page finds out which mode it's in from [`api/healthz.js`](api/healthz.js).
+
+1. On vercel.com: **Add New → Project**, then import `jphein/deadline-line`. The production branch is the repo's default, `public`.
+2. Leave the framework preset alone: [`vercel.json`](vercel.json) sets it to "Other", static `public/` plus the functions in `api/`.
+3. Under **Environment Variables**, add `ASSEMBLYAI_API_KEY`.
+4. **Deploy.** `https://<project>.vercel.app/api/healthz` should answer `{"ok":true,"stt":"assemblyai","mode":"vercel"}`. Then open the page and call the line.
+
+The phone line needs a PBX and the neural voice needs Piper or espeak-ng, so neither runs on Vercel. For those, run `npm start` somewhere that can.
+
 ## Running it as a public demo
 Every conversation holds an AssemblyAI streaming session on your key, so the web demo limits itself. Each limit is an environment variable:
 
@@ -51,8 +62,10 @@ Every conversation holds an AssemblyAI streaming session on your key, so the web
 
 Behind reverse proxies, set `TRUST_PROXY` to how many there are (usually `1`), so the per-visitor limits use that many `X-Forwarded-For` hops from the right, and keep `HOST=127.0.0.1` so only the proxy can reach the server. The global limits (at once, per day) bound the spend even if a visitor forges that header.
 
+**On Vercel** no server sees a conversation, so the limits work on tokens instead. Each token must open its session within 60 seconds, and AssemblyAI itself ends that session at `DEMO_SESSION_MAX_S`. `/api/token` gives one visitor at most `DEMO_SESSIONS_PER_IP_HOUR` tokens an hour, and the whole demo `DEMO_DAILY_S / DEMO_SESSION_MAX_S` tokens a UTC day (40 by default). The page hangs up after `DEMO_IDLE_S` of silence, and it asks for a token only once the microphone is allowed, so someone who only types never opens a billed session. These counts live in each function instance's memory, so they're best effort. A token can also start more than one session inside its 60 seconds, so lower the per-visitor and daily caps for a busy demo. The other limits in the table apply only to `npm start`.
+
 ## Privacy
-Sample letters only in demos. The bridge keeps each call's transcript in memory for the call's duration and writes nothing to disk. Audio goes to AssemblyAI for transcription and nowhere else.
+Sample letters only in demos. The bridge keeps each call's transcript in memory for the call's duration and writes nothing to disk. Audio goes to AssemblyAI for transcription and nowhere else. On Vercel, audio goes from the browser straight to AssemblyAI, and each final transcript goes to the decode function, which keeps nothing between requests.
 
 ## Known limits
 No barge-in yet: while the line is speaking, the caller's words are ignored. California and federal rules only; eviction deadlines assume personal service. General information, not legal advice.
