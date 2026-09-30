@@ -90,7 +90,7 @@ async function openMic() {
 }
 function closeMic(m) { m.s.getTracks().forEach(t => t.stop()); m.c.close(); }
 // Idle means no speech heard, nothing typed and the line not speaking. It only runs while AssemblyAI is
-// listening: a typed-only call opens no speech-to-text session, so leaving it open costs nothing.
+// listening: a call without the microphone (denied, or none) opens no speech-to-text session, so it costs nothing.
 function poke(call, extraS = 0) {
   if (!call.limits || call.over) return;
   clearTimeout(call.idle);

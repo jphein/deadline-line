@@ -16,7 +16,7 @@ Hear it: [`docs/sample-call.ogg`](docs/sample-call.ogg), a real SIP call to the 
 
 ```bash
 npm install
-npm test                                   # 54 tests, no keys needed (fake AssemblyAI, fake TTS)
+npm test                                   # 55 tests, no keys needed (fake AssemblyAI, fake TTS)
 ASSEMBLYAI_API_KEY=... TTS_WYOMING=host:10200 npm start
 #   web demo:    http://127.0.0.1:8770/   (hold a conversation with your mic, or type)
 #   AudioSocket: 127.0.0.1:9092           (for a local Asterisk)
@@ -71,7 +71,7 @@ Every conversation holds an AssemblyAI streaming session on your key, so the web
 
 Behind reverse proxies, set `TRUST_PROXY` to how many there are (usually `1`), so the per-visitor limits use that many `X-Forwarded-For` hops from the right, and keep `HOST=127.0.0.1` so only the proxy can reach the server. The global limits (at once, per day) bound the spend even if a visitor forges that header.
 
-**On Cloudflare Workers and Vercel** no server sees a conversation, so the limits work on tokens instead. Each token must open its session within 60 seconds, and AssemblyAI itself ends that session at `DEMO_SESSION_MAX_S`. `/api/token` gives one visitor at most `DEMO_SESSIONS_PER_IP_HOUR` tokens an hour, and the whole demo `DEMO_DAILY_S / DEMO_SESSION_MAX_S` tokens a UTC day (40 by default). The page hangs up after `DEMO_IDLE_S` of silence, and it asks for a token only once the microphone is allowed, so someone who only types never opens a billed session. These counts live in memory, per Worker isolate or function instance (a Worker runs in many isolates across Cloudflare's network), so they're best effort. A token can also start more than one session inside its 60 seconds, so lower the per-visitor and daily caps for a busy demo. The other limits in the table apply only to `npm start`.
+**On Cloudflare Workers and Vercel** no server sees a conversation, so the limits work on tokens instead. Each token must open its session within 60 seconds, and AssemblyAI itself ends that session at `DEMO_SESSION_MAX_S`. `/api/token` gives one visitor at most `DEMO_SESSIONS_PER_IP_HOUR` tokens an hour, and the whole demo `DEMO_DAILY_S / DEMO_SESSION_MAX_S` tokens a UTC day (40 by default). The page hangs up after `DEMO_IDLE_S` of silence, and it asks for a token only once the microphone is allowed, so a visitor who denies the microphone and types never opens a billed session. These counts live in memory, per Worker isolate or function instance (a Worker runs in many isolates across Cloudflare's network), so they're best effort. A token can also start more than one session inside its 60 seconds, so lower the per-visitor and daily caps for a busy demo. The other limits in the table apply only to `npm start`.
 
 ## Privacy
 Sample letters only in demos. The bridge keeps each call's transcript in memory for the call's duration and writes nothing to disk. Audio goes to AssemblyAI for transcription and nowhere else. On Workers or Vercel, audio goes from the browser straight to AssemblyAI, and each final transcript goes to the decode function, which keeps nothing between requests.
