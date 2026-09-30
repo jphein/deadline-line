@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 6a87918), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 99652d1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
@@ -45,6 +45,10 @@ export function forTheEar(line) {
     .replace(/ — /g, ", ");
 }
 
+// The first place to call, as a sentence. Most are free legal aid; a few (a jury office, the agency that gave a
+// ticket) are just who to ask, and carry their own sentence in `say`.
+export function helpSentence(h) { return h.say ?? `For free help: ${h.name}, ${h.how}.`; }
+
 function daysPhrase(n) {
   if (n > 1) return `${n} days from today`;
   if (n === 1) return "tomorrow";
@@ -60,10 +64,10 @@ export function computeDeadline(letterType, noticeDate, today = todayIso()) {
   const now = parseIso(today, "today");
   const notice = rule.anchor === null && noticeDate == null ? null : parseIso(noticeDate, "notice_date");
   const r = rule.compute(notice);
-  const help = `For free help: ${r.help[0].name}, ${r.help[0].how}.`;
+  const help = helpSentence(r.help[0]);
   const common = {
     letter_type: rule.id, letter_title: rule.title, notice_date: noticeDate ?? null, confidence: rule.confidence,
-    what_to_do: r.headline, how_we_counted: r.math, next_steps: r.steps, free_help: r.help, sources: r.sources,
+    what_to_do: r.headline, how_we_counted: r.math, next_steps: r.steps, free_help: r.help, help_spoken: forTheEar(help), sources: r.sources,
   };
   if (!r.deadline) {
     const lead = r.hedge;
@@ -107,27 +111,40 @@ export function computeDeadline(letterType, noticeDate, today = todayIso()) {
 }
 
 // Spoken dates rarely carry a year: "dated September 13th", "the 2nd of October", "yesterday".
-// Resolve them to the most recent such date on or before today (letters arrive after their date).
+// A letter's own date is in the past (letters arrive after their date), so a bare date resolves to the most
+// recent such day on or before today. A date said after a word that points ahead ("report October 1st", "my
+// rent goes up November 1st", "the hearing is on the 5th of October") is an event, not the letter's date: it
+// resolves to the nearest such day on or after today, and is never offered as the notice date.
 const MONTH_NAMES = ["january","february","march","april","may","june","july","august","september","october","november","december"];
 const MONTH_RE = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+const AHEAD = /\b(report(?:ing)?|appear|show up|hearing|court date|trial|due|until|before|starts?|starting|begins?|effective|goes up|go up|expires?|ends?|move out|vacate|next|coming)\b/gi;
+const BEHIND = /\b(dated|date on it|sent|mailed|got|received|came|arrived|served|handed|posted|taped|issued|printed|written|last)\b/gi;
+// Which cue is nearest before the date, in the same clause (up to 40 characters back): an ahead word, or a past
+// one ("my hearing notice dated September 3rd" is the letter's date: "dated" is nearer than "hearing").
+function isAhead(text, at) {
+  const clause = text.slice(Math.max(0, at - 40), at).split(/[.;!?]/).at(-1);
+  const last = re => { let m, i = -1; re.lastIndex = 0; while ((m = re.exec(clause))) i = m.index; return i; };
+  return last(AHEAD) > last(BEHIND);
+}
 function monthIndex(word) { return MONTH_NAMES.findIndex(m => m.startsWith(word.toLowerCase().slice(0, 3))); }
-function mostRecent(month, day, today) {
-  for (const y of [today.getUTCFullYear(), today.getUTCFullYear() - 1]) {
+function resolve(month, day, today, ahead) {
+  const y0 = today.getUTCFullYear();
+  for (const y of ahead ? [y0, y0 + 1] : [y0, y0 - 1]) {
     const dt = new Date(Date.UTC(y, month, day));
-    if (dt.getUTCMonth() === month && dt <= today) return iso(dt);
+    if (dt.getUTCMonth() === month && (ahead ? dt >= today : dt <= today)) return iso(dt);
   }
   return null;
 }
 export function findSpokenDates(text, today = todayIso()) {
   const now = d(today), out = [];
-  const add = (at, isoStr) => { if (isoStr) out.push({ at, iso: isoStr }); };
+  const add = (at, isoStr, ahead) => { if (isoStr) out.push({ at, iso: isoStr, ahead }); };
   let m;
   const a = new RegExp(`\\b${MONTH_RE}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?!,?\\s*20\\d{2})`, "gi");
-  while ((m = a.exec(text))) add(m.index, mostRecent(monthIndex(m[1]), +m[2], now));
+  while ((m = a.exec(text))) { const ahead = isAhead(text, m.index); add(m.index, resolve(monthIndex(m[1]), +m[2], now, ahead), ahead); }
   const b = new RegExp(`\\b(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+of\\s+${MONTH_RE}\\b`, "gi");
-  while ((m = b.exec(text))) add(m.index, mostRecent(monthIndex(m[2]), +m[1], now));
-  const c = /\b(today|yesterday)\b/gi;
-  while ((m = c.exec(text))) add(m.index, iso(addDays(now, m[1].toLowerCase() === "today" ? 0 : -1)));
+  while ((m = b.exec(text))) { const ahead = isAhead(text, m.index); add(m.index, resolve(monthIndex(m[2]), +m[1], now, ahead), ahead); }
+  const c = /\b(today|yesterday|tomorrow)\b/gi;
+  while ((m = c.exec(text))) { const w = m[1].toLowerCase(); add(m.index, iso(addDays(now, w === "today" ? 0 : w === "yesterday" ? -1 : 1)), w === "tomorrow"); }
   return out;
 }
 
@@ -156,7 +173,10 @@ export function detectLetter(text, today = todayIso(), among = []) {
     rule = printed?.id === "ssa-initial" && spoken?.id === "ssa-recon" ? spoken : (printed ?? spoken);
   }
   const group = rule ? null : AMBIGUOUS.find(g => g.spoken.test(text));
-  const dates = [...findDates(text), ...findSpokenDates(text, today)].sort((x, y) => x.at - y.at).map(x => x.iso);
+  // A letter's own date is never after today: a date ahead of today (or said as an event) isn't offered as it.
+  const all = [...findDates(text), ...findSpokenDates(text, today)].sort((x, y) => x.at - y.at);
+  const past = all.filter(x => !x.ahead && x.iso <= today).map(x => x.iso);
+  const dates = rule?.anchor === null ? [] : past;
   const ask = rule?.dateLabel ? (dates[0] ? `I see the date ${fmt(d(dates[0]))}. Is that the ${rule.dateLabel.toLowerCase()}?` : `What is the ${rule.dateLabel.toLowerCase()}?`) : "";
   return {
     letter_type: rule ? rule.id : null,
@@ -166,7 +186,7 @@ export function detectLetter(text, today = todayIso(), among = []) {
     needs_date: rule ? rule.anchor !== null : null,
     date_question: rule?.dateQuestion ?? null,
     candidates: group ? group.candidates : [],
-    dates_found: dates,
+    dates_found: all.map(x => x.iso),
     suggested_notice_date: dates[0] ?? null,
     speech: rule ? `That sounds like: ${rule.title}.${ask ? ` ${ask}` : ""}` : group ? group.question : UNKNOWN_LETTER,
   };
