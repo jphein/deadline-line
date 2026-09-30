@@ -10,6 +10,7 @@ const vendored = (dir = "vendor/deadline-decoder-mcp/src") =>
 test("the licence metadata names every licence the vendored files carry", () => {
   const pkg = JSON.parse(read("package.json")).license, lock = JSON.parse(read("package-lock.json")).packages[""].license;
   assert.equal(lock, pkg);
+  assert.ok(pkg.split(" AND ").includes("MIT"), `package.json licence "${pkg}" keeps MIT for this repository's own files`);
   const files = vendored();
   assert.ok(files.length >= 5);
   for (const f of files) {

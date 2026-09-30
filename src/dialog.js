@@ -65,7 +65,10 @@ export class Dialog {
     }
     if (BYE.test(t) && !/\bletter|notice|papers\b/i.test(t)) return this.goodbye();
 
-    const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates } : { text: t }));
+    // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
+    // ("the due date was August 1st" looks back for a shutoff notice).
+    const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
+      : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
@@ -103,7 +106,7 @@ export class Dialog {
     const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
-    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} ${r.help_spoken ?? `For free help, ${r.free_help[0].name}.`} ${next}`);
+    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
