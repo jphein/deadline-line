@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 6a87918), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 99652d1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -13,13 +13,16 @@ const LSNC = { name: "Legal Services of Northern California", how: "free civil l
 const LAWHELP = { name: "LawHelpCA.org", how: "find free legal aid anywhere in California by county" };
 const SELFHELP = { name: "California Courts Self-Help Guide", how: "selfhelp.courts.ca.gov — forms and step-by-step help" };
 const TWO11 = { name: "211", how: "dial 2-1-1 from any phone, 24/7, English and Spanish" };
-const JURY = { name: "Your court's jury office", how: "the phone number and website are printed on your summons" };
+const JURY = { name: "Your court's jury office", how: "the phone number and website are printed on your summons",
+  say: "For questions, call your court's jury office: the phone number and website are printed on your summons." };
 const EDD = { name: "EDD", how: "1-800-300-5616 in English, 1-800-326-8937 in Spanish" };
 const SSA = { name: "Social Security", how: "1-800-772-1213 (TTY 1-800-325-0778)" };
 const STATE_HEARINGS = { name: "CDSS State Hearings", how: "(800) 743-8525 (voice and TDD)" };
 const TAS = { name: "Taxpayer Advocate Service", how: "1-877-777-4778, free help when an IRS problem isn't getting fixed" };
-const LITC = { name: "A Low Income Taxpayer Clinic", how: "free or low-cost help with IRS disputes if you qualify; the Taxpayer Advocate Service lists clinics by state" };
-const PARKING_AGENCY = { name: "The agency that gave the ticket", how: "its phone number and website are on the ticket or notice" };
+const LITC = { name: "A Low Income Taxpayer Clinic", how: "free or low-cost help with IRS disputes if you qualify; the Taxpayer Advocate Service lists clinics by state",
+  say: "For help, a Low Income Taxpayer Clinic gives free or low-cost help with IRS disputes if you qualify; the Taxpayer Advocate Service lists clinics by state." };
+const PARKING_AGENCY = { name: "The agency that gave the ticket", how: "its phone number and website are on the ticket or notice",
+  say: "For questions, contact the agency that gave the ticket: its phone number and website are on the ticket or notice." };
 const PAYPLAN = "If you get public benefits or have a low income, ask the agency about a payment plan. People who qualify must be offered one before an unpaid ticket is sent to the DMV.";
 
 function yearNote(date) {

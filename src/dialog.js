@@ -103,7 +103,7 @@ export class Dialog {
     const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
-    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} For free help, ${r.free_help[0].name}. ${next}`);
+    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} ${r.help_spoken ?? `For free help, ${r.free_help[0].name}.`} ${next}`);
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
