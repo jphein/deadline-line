@@ -11,7 +11,14 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
 const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
-const HOA = /\b(HOA|homeowners'? association|association)\b/i;
+// An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
+// owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
+// "HOA" and "H.O.A." in any case; ASR's spaced "H O A" only in capitals, since "ho a hearing" is ASR too.
+const HOA_ANYCASE = /\b(HOA\b|H\.\s?O\.\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
+const HOA_SPACED = /\bH O A\b/;
+const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_SPACED.test(t) };
+// The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
+const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
 const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
@@ -66,6 +73,12 @@ export class Dialog {
       if (YES.test(t)) { this.awaiting = null; return this.say("Okay. In the real service I'd text the date and a calendar reminder to this number. " + this.closing(), true); }
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
+    // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
+    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !LETTERISH.test(t)) {
+      const r = this.result ?? await this.compute();
+      const step = r.next_steps.find(s => HOA_STEP.test(s));
+      if (step) return this.say(`${step} ${this.awaiting === "more" ? "Want me to explain how I counted?" : "Do you have another letter I can help with?"}`);
+    }
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
       if ((NO.test(t) || BYE.test(t)) && !LETTERISH.test(t)) return this.goodbye();
       this.reset();
@@ -78,11 +91,13 @@ export class Dialog {
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
-    // A different letter than the one we were on: an earlier HOA mention was about that one, not this.
-    if (det.recognized && det.letter_type !== this.letter) { if (this.letter) this.hoa = false; this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
+    if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
     if (HOA.test(t)) this.hoa = true;   // "my HOA sent me a letter" → "what kind?" → "a notice of default"
+    // A different sender named ("…actually it's from my mortgage lender") clears an earlier HOA mention; a corrected
+    // letter from the same sender ("my HOA gave me a 3 day notice" → "actually it's a notice of default") doesn't.
+    else if (LENDER.test(t)) this.hoa = false;
     if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
