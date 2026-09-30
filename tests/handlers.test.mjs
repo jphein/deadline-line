@@ -49,6 +49,9 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["a debt collector sent me a letter", "no"],
       ["social security denied me again and my hearing is scheduled", "not yet", "the notice is dated September 13th", "no"],
       ["social security denied me again and my hearing is scheduled", "yes, I already had it", "the decision is dated September 13th", "no"],
+      ["I got a notice of default on my house", "no"],
+      ["they're suing me in small claims", "no"],
+      ["I got a notice of trustee's sale", "no"],
       ["EDD says I'm not eligible for unemployment, the notice was mailed September 10th", "bye"],
       ["I got a notice to vacate", "sixty days", "September 1st"],
     ];

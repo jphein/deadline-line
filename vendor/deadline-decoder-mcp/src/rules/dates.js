@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 34700e9), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ e8973053e7c9dc66c4ff5e63fc75ad1838015ef1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // dates.js — deadline arithmetic. Pure functions, no DOM, tested in tests/dates.test.mjs.
 // All dates are local calendar dates handled as UTC-midnight Date objects to avoid DST drift.

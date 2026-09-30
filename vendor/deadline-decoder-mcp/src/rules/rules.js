@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 34700e9), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ e8973053e7c9dc66c4ff5e63fc75ad1838015ef1), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -916,6 +916,92 @@ export const RULES = [
     help: [LSNC, LAWHELP, TWO11],
     sources: ["24 CFR 966.4(l)(3)(i) (a public housing lease termination notice: at least 30 days for unpaid rent; shorter for threats to health or safety, drug-related or violent criminal activity, or a felony) and (l)(3)(ii) (the notice states the grounds and the tenant's rights, including a grievance hearing when it applies)"],
   }),
+  // ---- housing: foreclosure (a deed of trust) --------------------------------------------------------------------
+  spec({
+    id: "ca-foreclosure-nod",
+    family: "housing",
+    title: "California: a Notice of Default on your home loan (the start of a foreclosure)",
+    plain: "A recorded notice that you're behind on a mortgage or deed of trust, the first step before a trustee's sale.",
+    confidence: "HEDGE",
+    anchor: null,
+    count: null,
+    hedge: "A Notice of Default starts the foreclosure clock: the home can't be sold until at least 3 months and 20 days after it was recorded, and the recording date is on the notice.",
+    must: /notice of default|foreclos\w*|behind on (my |the )?(mortgage|house payments?|home loan)|deed of trust/i,
+    // Not a tenant whose landlord is being foreclosed on (a tenant has other rights and dates), and not a car, a
+    // storage unit or a property-tax default.
+    // …and not an HOA's assessment-lien foreclosure (Civil Code § 5700 et seq. adds its own steps; not verified here).
+    not: /trustee'?s sale|notice of sale|auction|\b(car|vehicle|truck|storage|property tax(es)?|tax sale|landlord|tenant|I rent|renting|renter|HOA|homeowners'? association|assessment lien)\b/i,
+    detect: [/notice of default|election to sell/i, /deed of trust|mortgage|trustee|beneficiary/i, /reinstat\w*|past due|default|foreclos\w*/i],
+    spoken: /notice of default|foreclos\w*|behind on (my |the )?(mortgage|house payments?|home loan)/i,
+    answers: /\b(default|mortgage|foreclos\w*|home loan)\b/i,
+    keyterms: ["Notice of Default", "foreclosure", "deed of trust"],
+    headline: "Call a HUD-approved housing counselor or legal aid now, and ask the lender how to catch up",
+    steps: [
+      "You can catch up on the missed payments and costs (reinstate) until 5 business days before the sale date in the notice of sale.",
+      "Watch for a Notice of Trustee's Sale: it sets the sale date, and the time to catch up ends 5 business days before it.",
+      "Ask the lender in writing for the amount to catch up, and about other options such as a loan modification.",
+    ],
+    help: [LSNC, LAWHELP, TWO11],
+    sources: ["Civil Code § 2924(a)(2)–(4) (at least three months after the notice of default is filed before a notice of sale; the sale no earlier than three months and 20 days after it's recorded)",
+              "Civil Code § 2924c(b)(1) (the notice of default's own statement: no sale date may be set until approximately 90 days after it's recorded)",
+              "Civil Code § 2924c(e) (reinstatement from the notice of default until five business days before the sale date in the recorded notice of sale)"],
+  }),
+  spec({
+    id: "ca-foreclosure-sale",
+    family: "housing",
+    title: "California: a Notice of Trustee's Sale (your home is set to be sold)",
+    plain: "A notice giving the date, time and place your home will be sold at a foreclosure auction.",
+    confidence: "HEDGE",
+    anchor: null,
+    count: null,
+    hedge: "A Notice of Trustee's Sale prints the date the home will be sold. You can usually still catch up on the loan (reinstate) until 5 business days before that date.",
+    must: /trustee'?s sale|notice of sale|foreclosure (sale|auction)|auction/i,
+    // Not a car, storage, pawn or tax sale; not a tenant (a tenant after a foreclosure sale has other rights and dates);
+    // not an IRS or sheriff's sale for a judgment (not a § 2924 trustee's sale).
+    not: /\b(car|vehicle|truck|storage|pawn|property tax(es)?|tax sale|tax[- ]defaulted|landlord|tenant|I rent|renting|renter|notice to vacate|IRS|internal revenue|sheriff|judgment)\b/i,
+    detect: [/trustee'?s sale|notice of sale/i, /deed of trust|trustee|beneficiary|mortgage/i, /auction|public sale|sale date|highest bidder/i],
+    spoken: /trustee'?s sale|notice of sale|foreclosure (sale|auction)|auction(ing)? (off )?my (house|home)|sell(ing)? my (house|home) at (an )?auction|auction date for my (house|home)/i,
+    answers: /\b(sale|auction|trustee)\b/i,
+    keyterms: ["Notice of Trustee's Sale", "trustee sale", "reinstate"],
+    headline: "Call a housing counselor or legal aid today",
+    steps: [
+      "Ask the lender in writing, right away, for the amount to catch up (the reinstatement amount).",
+      "If the sale is postponed by more than 5 business days, the time to catch up comes back, until 5 business days before the new date.",
+      "Don't wait for the last days: ask legal aid now what can still be done.",
+    ],
+    help: [LSNC, LAWHELP, TWO11],
+    sources: ["Civil Code § 2924c(e) (reinstatement until five business days before the sale date in the recorded notice of sale; revived when a sale is postponed for more than five business days)"],
+  }),
+  // ---- court: small claims -----------------------------------------------------------------------------------------
+  spec({
+    id: "ca-small-claims",
+    family: "court",
+    title: "California: small claims court papers (someone is suing you in small claims)",
+    plain: "A Plaintiff's Claim and Order to Go to Small Claims Court, with the hearing date.",
+    confidence: "HEDGE",
+    anchor: null,
+    count: null,
+    hedge: "Small claims papers give the hearing date, and that's the date that counts.",
+    must: /small claims|SC-100|plaintiff'?s claim and order/i,
+    // Being sued, not suing, and not collecting a judgment you won.
+    // …and never an eviction (a UD needs a written response within 5 court days; small claims can't hear one), unless
+    // it's a landlord suing for back rent or a deposit with no eviction word.
+    not: /\b(want(ed)? to sue|I('m| am)? (going to )?sue|I('m| am) suing|I sued|file (a|my) (small claims|claim)|I won(?!'t)|collect (my|the|on (a|my|the)) judgment)\b|\b(unlawful detainer|UD)\b|^(?!.*\b(back rent|security deposit)\b).*\bevict\w*/is,
+    detect: [/small claims/i, /plaintiff'?s claim|SC-100|order to go to/i, /hearing|court date|trial date|defendant/i],
+    spoken: /small claims/i,
+    answers: /\bsmall claims\b/i,
+    keyterms: ["small claims", "Plaintiff's Claim", "SC-100"],
+    headline: "Go to the hearing on that date, with your witnesses and documents",
+    steps: [
+      "Go to the hearing on the date on the papers, and bring your witnesses and any documents that show your side.",
+      "If you can't go that day, ask the court in writing to postpone it, at least 10 days before the hearing if you can. Later, you can still ask, but you'll need a good reason. Mail or hand a copy to each of the other parties the same day.",
+      "The papers had to be served at least 15 days before the hearing, or 20 if you live in another county. If they came later, tell the court.",
+    ],
+    help: [SELFHELP, LAWHELP, TWO11],
+    sources: ["Code of Civil Procedure § 116.330(a) (the order directs the parties to appear at the hearing with witnesses and documents)",
+              "Code of Civil Procedure § 116.570(a) (a written request to postpone for good cause, at least 10 days before the hearing, copied to the other parties)",
+              "Code of Civil Procedure § 116.340(b) (service at least 15 days before the hearing, or 20 if the defendant lives outside the county)"],
+  }),
   // ---- taxes: the IRS -------------------------------------------------------------------------------------------
   spec({
     id: "irs-deficiency",
@@ -1031,7 +1117,7 @@ const SS_AS_INCOME = /^(?!.*\b(social security|SSA|SSI|SSDI|they)\b(?:(?!\b(DMV|
 for (const r of RULES) if (r.family === "ssa") r.not = anyOf(r.not, NOT_SSA, NOT_SSA_VA, EDD_FIRST, SS_AS_INCOME);
 
 // The spoken detector tries rules in this order: most specific first ("a jury summons" before "summons").
-export const SPOKEN_ORDER = ["jury-summons", "ca-ud", "ca-civil-summons", "ca-3day", "ca-medi-cal-plan", "ca-medi-cal-plan-denial",
+export const SPOKEN_ORDER = ["jury-summons", "ca-ud", "ca-small-claims", "ca-civil-summons", "ca-foreclosure-sale", "ca-foreclosure-nod", "ca-3day", "ca-medi-cal-plan", "ca-medi-cal-plan-denial",
   "ca-noa", "ca-edd-sdi", "ssa-overpayment", "ssa-benefits-ending", "ssa-appeals-council", "ssa-recon", "ssa-initial", "ca-edd-determination", "ca-parking-review", "ca-parking-delinquent", "ca-parking-ticket", "ca-dmv-aps", "ca-traffic-ticket",
   "ca-ftb-npa", "irs-deficiency", "irs-levy", "irs-cp2000", "hud-public-housing", "hud-voucher-termination", "ca-sheriff-vacate", "ca-subsidy-end", "ca-water-shutoff", "ca-utility-shutoff", "ca-repo-notice", "debt-validation", "ca-60day-notice", "ca-30day-notice", "ca-rent-increase"];
 
