@@ -1,10 +1,11 @@
-// The Vercel target: api/*.js and src/vercel.js. No network: AssemblyAI's token endpoint is a fake fetch.
+// The serverless handlers (src/handlers.js) and their Vercel adapter (api/*.js). The Cloudflare Workers adapter
+// is in worker.test.mjs. No network: AssemblyAI's token endpoint is a fake fetch.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Dialog, GREETING } from "../src/dialog.js";
-import { AAI_URL, KEYTERMS, streamingQuery } from "../src/aai.js";
+import { AAI_WS_URL, KEYTERMS, streamingQuery } from "../src/streaming.js";
 import { demoConfig, tokenLimits, MESSAGES } from "../src/limits.js";
-import { decodeHandlers, tokenHandler, healthHandler, cleanState, vercelClientIp, TOKEN_URL, TOKEN_TTL_S } from "../src/vercel.js";
+import { decodeHandlers, tokenHandler, healthHandler, cleanState, CLIENT_IP, TOKEN_URL, TOKEN_TTL_S } from "../src/handlers.js";
 import * as decodeApi from "../api/decode.js";
 import * as tokenApi from "../api/token.js";
 import * as healthApi from "../api/healthz.js";
@@ -105,7 +106,7 @@ test("api/token: a 60 s token for a session AssemblyAI ends at the demo's cap, a
   assert.equal(calls[0].url.searchParams.get("expires_in_seconds"), "60");
   assert.equal(calls[0].url.searchParams.get("max_session_duration_seconds"), "180");
   const ws = new URL(j.url);
-  assert.equal(`${ws.protocol}//${ws.host}${ws.pathname}`, AAI_URL);
+  assert.equal(`${ws.protocol}//${ws.host}${ws.pathname}`, AAI_WS_URL);
   assert.equal(ws.searchParams.get("token"), "tok-123");
   ws.searchParams.delete("token");
   assert.equal(ws.searchParams.toString(), streamingQuery(16000, KEYTERMS).toString());   // what the server's sessions use
@@ -164,10 +165,30 @@ test("api/token: the session cap stays inside AssemblyAI's 60 to 10800 s", T, as
   }
 });
 
-test("vercelClientIp: x-real-ip, else the first x-forwarded-for entry", () => {
-  assert.equal(vercelClientIp(new Headers({ "x-real-ip": "203.0.113.9", "x-forwarded-for": "198.51.100.1" })), "203.0.113.9");
-  assert.equal(vercelClientIp(new Headers({ "x-forwarded-for": "198.51.100.1, 10.1.1.1" })), "198.51.100.1");
-  assert.equal(vercelClientIp(new Headers()), "unknown");
+test("the visitor's address comes from the header each platform sets: x-real-ip on Vercel, cf-connecting-ip on Workers", () => {
+  const vercel = CLIENT_IP.vercel, workers = CLIENT_IP["cloudflare-workers"];
+  assert.equal(vercel(new Headers({ "x-real-ip": "203.0.113.9", "x-forwarded-for": "198.51.100.1" })), "203.0.113.9");
+  assert.equal(vercel(new Headers({ "x-forwarded-for": "198.51.100.1, 10.1.1.1" })), "198.51.100.1");
+  assert.equal(vercel(new Headers()), "unknown");
+  // On Cloudflare a client can send any x-real-ip; only cf-connecting-ip is Cloudflare's own
+  assert.equal(workers(new Headers({ "cf-connecting-ip": "203.0.113.9", "x-real-ip": "1.2.3.4" })), "203.0.113.9");
+  assert.equal(workers(new Headers({ "x-real-ip": "1.2.3.4" })), "unknown");
+});
+
+test("api/token: the per-visitor cap follows the platform's own address header", T, async () => {
+  const f = fakeTokenFetch();
+  const GET = tokenHandler({ env: { ASSEMBLYAI_API_KEY: KEY }, fetch: f.fetch, ip: CLIENT_IP["cloudflare-workers"],
+    limits: tokenLimits({ ...demoConfig({}), perIpPerHour: 1 }) });
+  const as = (cf, spoof) => GET(req("/api/token", { headers: { "cf-connecting-ip": cf, "x-real-ip": spoof } }));
+  assert.equal((await as("203.0.113.1", "1.1.1.1")).status, 200);
+  assert.equal((await as("203.0.113.1", "2.2.2.2")).status, 429);     // a new x-real-ip doesn't make a new visitor
+  assert.equal((await as("203.0.113.2", "2.2.2.2")).status, 200);
+});
+
+test("api/token: AAI_STREAMING_URL in the env points the page at another endpoint (a rehearsal stand-in)", T, async () => {
+  const f = fakeTokenFetch();
+  const r = await tokenHandler({ env: { ASSEMBLYAI_API_KEY: KEY, AAI_STREAMING_URL: "ws://127.0.0.1:8799/v3/ws" }, fetch: f.fetch })(req("/api/token"));
+  assert.match((await r.json()).url, /^ws:\/\/127\.0\.0\.1:8799\/v3\/ws\?/);
 });
 
 // ---- the api/ modules as Vercel loads them ------------------------------------------------------------------
@@ -175,7 +196,7 @@ test("api/*.js: Web handlers that read the key when a request arrives", T, async
   const saved = { key: process.env.ASSEMBLYAI_API_KEY, fetch: globalThis.fetch };
   try {
     delete process.env.ASSEMBLYAI_API_KEY;
-    assert.deepEqual(await (await healthApi.GET(req("/api/healthz"))).json(), { ok: true, stt: "missing key", mode: "vercel" });
+    assert.deepEqual(await (await healthApi.GET(req("/api/healthz"))).json(), { ok: true, stt: "missing key", mode: "direct", platform: "vercel" });
     assert.equal((await tokenApi.GET(req("/api/token"))).status, 503);
     process.env.ASSEMBLYAI_API_KEY = KEY;
     const f = fakeTokenFetch(); globalThis.fetch = f.fetch;
@@ -190,9 +211,7 @@ test("api/*.js: Web handlers that read the key when a request arrives", T, async
   }
 });
 
-test("healthHandler: mode is vercel, and stt says whether the key is set", () => {
-  return Promise.all([healthHandler({ ASSEMBLYAI_API_KEY: "k" })().json(), healthHandler({})().json()]).then(([a, b]) => {
-    assert.deepEqual(a, { ok: true, stt: "assemblyai", mode: "vercel" });
-    assert.deepEqual(b, { ok: true, stt: "missing key", mode: "vercel" });
-  });
+test("healthHandler: mode direct, the platform, and whether the key is set", async () => {
+  assert.deepEqual(await healthHandler({ ASSEMBLYAI_API_KEY: "k" }, "vercel")().json(), { ok: true, stt: "assemblyai", mode: "direct", platform: "vercel" });
+  assert.deepEqual(await healthHandler({}, "cloudflare-workers")().json(), { ok: true, stt: "missing key", mode: "direct", platform: "cloudflare-workers" });
 });
