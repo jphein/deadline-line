@@ -467,6 +467,18 @@ test("dialog: small claims papers from a debt collector get the small-claims ans
   } finally { await mcp.close(); }
 });
 
+test("dialog: a validation notice with the CFPB complaint line gets the validation answer", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const a = await d.handle("Example Collections LLC is a debt collector. We are trying to collect a debt that you owe to Example Bank. " +
+      "How can you dispute the debt? Call or write to us by October 30, 2026, to dispute all or part of the debt. " +
+      "If you have a complaint about how we are collecting this debt, contact the CFPB at www.consumerfinance.gov or call 1-855-411-2372.");
+    assert.equal(d.letter, "debt-validation");
+    assert.doesNotMatch(a.say, /summons|court papers/i);
+  } finally { await mcp.close(); }
+});
+
 test("dialog: restore() takes the HOA flag only as a real true (a tampered snapshot doesn't bring the step)", async () => {
   const mcp = await startMcp();
   try {
