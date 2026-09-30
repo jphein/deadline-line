@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 0a1174a4395645d4751532daa2573dab7e571887), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ c4cf46243861800b12d9d6c7fc30ea5ec5feb6a3), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -824,7 +824,7 @@ export const RULES = [
     // (the IRS, FTB, EDD, Social Security, child support, a county or court): the validation rules cover debt collectors.
     // An actual suit (being sued, papers, a summons), not the boilerplate a validation notice carries ("if you are sued",
     // "we will not sue you", "the law limits how long you can be sued", "may be eligible for small claims").
-    not: /\b((sued|suing|sue[sd]?|took|taking|filed) me\b|filed (a|the) (suit|lawsuit|case)|summons|court papers|complaint|served|small claims (papers|court papers|claim|case|hearing)|plaintiff'?s claim|SC-100)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court (fines?|fees?|costs)|trash|garbage|recycling)\b/i,
+    not: /\b((sued|sues|suing|took|taking|filed) me\b|filed (a|the) (suit|lawsuit|case)|summons|court papers|(a|the) complaint (was |has been )?filed|complaint against you|served (me |you )?with|(been|got) served|served papers|small claims (papers|court papers|claim|case|hearing)|plaintiff'?s claim|SC-100)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court (fines?|fees?|costs)|trash|garbage|recycling)\b/i,
     detect: [/debt collect\w*|collection agency|collector/i, /validation|dispute|verif\w*/i, /\b(owe|balance|creditor|debt)\b/i],
     spoken: /^(?!.*\b((sued|suing) me|filed (a|the) (suit|lawsuit|case)|summons|court papers)\b).*(debt collect\w*|collection agency|\b(sent|went|gone|turned over) (\w+ ){0,3}to collections\b|\bcollections? (letter|notice|agency|company)\b|validation notice)/is,
     answers: /\b(collect\w*|collector|debt)\b/i,
@@ -994,7 +994,7 @@ export const RULES = [
     // Being sued, not suing, and not collecting a judgment you won.
     // …and never an eviction (a UD needs a written response within 10 court days, CCP § 1167 as amended by AB 2347; small claims can't hear one), unless
     // it's a landlord suing for back rent or a deposit with no eviction word.
-    not: /\b(want(ed)? to sue|I('m| am)? (going to )?sue|I('m| am) suing|I sued|file (a|my) (small claims|claim)|I won(?!['’]t)|collect (my|the|on (a|my|the)) judgment)\b|\b(might|may|could|will|going to|threaten\w*)\b.{0,20}\b(take|sue) me\b|\b(unlawful detainer|UD)\b|^(?!.*\b(back rent|security deposit)\b).*\bevict\w*/is,
+    not: /\b(want(ed)? to sue|I('m| am)? (going to )?sue|I('m| am) suing|I sued|file (a|my) (small claims|claim)|I won(?!['’]t)|collect (my|the|on (a|my|the)) judgment)\b|(\b(might|may|could|will|going to|threaten\w*)\b|['’]ll\b).{0,20}\b(take me to|sue me)\b|\b(unlawful detainer|UD)\b|^(?!.*\b(back rent|security deposit)\b).*\bevict\w*/is,
     detect: [/small claims/i, /plaintiff'?s claim|SC-100|order to go to/i, /hearing|court date|trial date|defendant/i],
     spoken: /small claims/i,
     answers: /\bsmall claims\b/i,
