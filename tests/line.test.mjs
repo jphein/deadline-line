@@ -334,7 +334,7 @@ test("dialog: a request to repeat still repeats; 'denied me again' is heard as w
   try {
     for (const ask of ["say that again", "can you repeat that", "pardon?", "come again?", "again", "one more time please", "what was that",
       "say again", "tell me again", "can you tell me that again", "read it again", "go over that again", "again, please", "what did you say",
-      "sorry, what?", "huh?", "what?", "will you say that again", "can you tell me my deadline again", "go over my options again"]) {
+      "sorry, what?", "huh?", "what?", "will you say that again", "can you tell me my deadline again", "go over my options again", "sorry?"]) {
       const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
       const first = await d.handle("I got a jury summons in the mail");
       assert.equal((await d.handle(ask)).say, first.say, ask);
