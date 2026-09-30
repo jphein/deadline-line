@@ -5,7 +5,7 @@
 For people without a smartphone, a data plan or the energy to read one more letter. The Deadline Line is a voice agent you reach by phone (or in the browser): describe your letter in your own words ("I got a letter from Social Security dated September 13th, they denied my disability again") and it answers with the exact deadline, how many days are left, what to do first and where to get free legal help. Then, if you ask, it explains how it counted.
 
 - **Speech-to-text:** [AssemblyAI Universal-Streaming](https://www.assemblyai.com/docs/speech-to-text/universal-streaming) (v3 WebSocket), with key-term prompting for benefits and eviction vocabulary. 8 kHz from the phone, 16 kHz from the browser.
-- **Deadline rules:** the Deadline Decoder MCP server, vendored in [`vendor/deadline-decoder-mcp/`](vendor/deadline-decoder-mcp/): tested code citing 20 CFR 404.933, CCP §§ 1161 and 1167, and W&I Code § 10951. **The AI never computes a date.**
+- **Deadline rules:** the Deadline Decoder MCP server, vendored in [`vendor/deadline-decoder-mcp/`](vendor/deadline-decoder-mcp/): tested code with cited sources for each kind of letter (Social Security denials, California housing notices and eviction papers, other court papers, jury summonses, Medi-Cal/CalFresh notices, and more on this branch). **The AI never computes a date.** When the words fit more than one kind ("I got a summons"), the line asks which; when a notice sets its own date, the line says so and points to it.
 - **Voice:** a local neural voice (Piper over the Wyoming protocol) or espeak-ng.
 - **Phone:** runs on the project's own Asterisk, through its AudioSocket. Each call is a TCP stream of 8 kHz audio frames into this bridge.
 - **Browser demo on Cloudflare Workers (or Vercel):** the page talks to AssemblyAI directly with a temporary token, and gets each reply from a serverless function that runs the same dialog over the same rules (below). Run locally, the browser demo goes through this server instead.
@@ -16,7 +16,7 @@ Hear it: [`docs/sample-call.ogg`](docs/sample-call.ogg), a real SIP call to the 
 
 ```bash
 npm install
-npm test                                   # 55 tests, no keys needed (fake AssemblyAI, fake TTS)
+npm test                                   # 59 tests, no keys needed (fake AssemblyAI, fake TTS)
 ASSEMBLYAI_API_KEY=... TTS_WYOMING=host:10200 npm start
 #   web demo:    http://127.0.0.1:8770/   (hold a conversation with your mic, or type)
 #   AudioSocket: 127.0.0.1:9092           (for a local Asterisk)
@@ -43,6 +43,12 @@ npx wrangler secret put ASSEMBLYAI_API_KEY    # once; the key is a secret, never
 npx wrangler deploy                           # the name, assets and bindings come from wrangler.toml
 ```
 `https://deadline-line.<your-subdomain>.workers.dev/api/healthz` should then answer `{"ok":true,"stt":"assemblyai","mode":"direct","platform":"cloudflare-workers"}`. To try it locally first: `CLOUDFLARE_INCLUDE_PROCESS_ENV=true ASSEMBLYAI_API_KEY=... npx wrangler dev`, or put the key in a `.dev.vars` file, which git ignores.
+
+To try the `develop` branch without touching that Worker, deploy it as a second one, `deadline-line-next`, whose `/api/healthz` also says `"channel":"next"`:
+```bash
+npx wrangler secret put ASSEMBLYAI_API_KEY --env next
+npx wrangler deploy --env next
+```
 
 ## Or deploy on Vercel (free)
 The same handlers run on Vercel's free Hobby plan, through the thin adapters in [`api/`](api/).
@@ -80,4 +86,4 @@ Sample letters only in demos. The bridge keeps each call's transcript in memory 
 No barge-in yet: while the line is speaking, the caller's words are ignored. California and federal rules only; eviction deadlines assume personal service. General information, not legal advice.
 
 ## License
-MIT © 2026 Jeffrey Pine Hein, including `vendor/deadline-decoder-mcp/` (vendored from its MIT release by the same author). Built for [TechEMPOWER](https://techempower.org).
+MIT © 2026 Jeffrey Pine Hein, except `vendor/deadline-decoder-mcp/`: on this branch it is vendored from the rules engine's `develop` branch, which is AGPL-3.0-or-later (see [its LICENSE](vendor/deadline-decoder-mcp/LICENSE) and the header of each file), so a deployment of this branch offers its source (the page links here). The `public` branch vendors the engine's earlier MIT release. Re-vendor with `scripts/vendor-decoder.sh <checkout>`. Built for [TechEMPOWER](https://techempower.org).

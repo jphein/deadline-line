@@ -30,7 +30,7 @@ export const CLIENT_IP = {
  *  (today in California), returning what the MCP client returns (the structured result, as plain JSON). */
 export function localCallTool() {
   const tools = {
-    detect_letter: ({ text, today }) => detectLetter(text, today ?? todayIso()),
+    detect_letter: ({ text, today, among }) => detectLetter(text, today ?? todayIso(), among ?? []),
     compute_deadline: ({ letter_type, notice_date, today }) => computeDeadline(letter_type, notice_date, today ?? todayIso()),
   };
   return async (name, args) => {
@@ -40,7 +40,7 @@ export function localCallTool() {
 }
 
 const LETTERS = new Set(listLetterTypes().map(t => t.id));
-const AWAITING = new Set(["letter", "date", "more", "text"]);
+const AWAITING = new Set(["letter", "date", "more", "text", "another"]);
 
 /** The page sends back the state it was given, or anything at all: keep only well-formed fields. */
 export function cleanState(s) {
@@ -50,7 +50,9 @@ export function cleanState(s) {
   let awaiting = AWAITING.has(s.awaiting) ? s.awaiting : null;
   if (awaiting === "more" && !(letter && date)) awaiting = null;     // "how did you count?" needs a deadline
   const last = typeof s.last === "string" ? s.last.slice(0, MAX_LAST) : undefined;
-  return { letter, date, awaiting, last };
+  const candidates = Array.isArray(s.candidates) ? [...new Set(s.candidates.filter(c => LETTERS.has(c)))].slice(0, 5) : [];
+  const dateQuestion = typeof s.dateQuestion === "string" ? s.dateQuestion.slice(0, 300) : null;
+  return { letter, date, awaiting, last, candidates, dateQuestion };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).
@@ -115,9 +117,11 @@ export function tokenHandler({ env, fetch: fetchImpl, limits = tokenLimits(demoC
   };
 }
 
-/** /api/healthz. The page reads mode ("direct": call AssemblyAI itself); platform says which adapter answered. */
+/** /api/healthz. The page reads mode ("direct": call AssemblyAI itself); platform says which adapter answered, and
+ *  channel (when the deployment sets CHANNEL, as deadline-line-next does) which build. */
 export function healthHandler(env, platform) {
-  return () => json({ ok: true, stt: env.ASSEMBLYAI_API_KEY ? "assemblyai" : "missing key", mode: "direct", platform });
+  return () => json({ ok: true, stt: env.ASSEMBLYAI_API_KEY ? "assemblyai" : "missing key", mode: "direct", platform,
+    ...(env.CHANNEL ? { channel: String(env.CHANNEL) } : {}) });
 }
 
 /** The three endpoints on one platform: { "/api/token": { GET }, ... }. Both adapters build them here. */

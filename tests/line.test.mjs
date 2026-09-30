@@ -131,9 +131,48 @@ test("dialog: unknown letter asks which kind; repeat works", async () => {
   try {
     const d = new Dialog(mcp.callTool, { today: TODAY });
     const a = await d.handle("hi, I got some kind of letter and I'm worried");
-    assert.match(a.say, /Social Security, a landlord's three day notice/);
+    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it from Social Security, a landlord, a court, or the county about Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
     const b = await d.handle("can you repeat that");
     assert.equal(b.say, a.say);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a jury summons has nothing to count, so it answers at once and offers another letter", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    const a = await d.handle("I got a jury summons in the mail");
+    assert.match(a.say, /^A jury summons prints its own date to respond or to report, and that's the date that counts\. Respond to the court by the date on the summons\. First step: /);
+    assert.match(a.say, /Do you have another letter I can help with\?$/);
+    assert.doesNotMatch(a.say, /explain how I counted/);
+    assert.equal((await d.handle("yes")).say, "Okay. Tell me what kind of letter it is, and the date on it.");
+    const b = await d.handle("I got a letter from Social Security dated September 13th, they denied my disability again");
+    assert.match(b.say, /^Your deadline is Tuesday, November 17, 2026\./);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a bare summons becomes a question, and the answer picks among its candidates", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    assert.equal((await d.handle("I got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
+    const a = await d.handle("a debt collector, about money I owe");
+    assert.equal(a.say, "Got it: California: court papers for a lawsuit (a Summons that isn't about an eviction). What day were the papers handed to you? You can say something like September 13th.");
+    const b = await d.handle("September 21st");                       // Mon Sep 21 + 30 = Wed Oct 21
+    assert.match(b.say, /^Your deadline is Wednesday, October 21, 2026\. That's 25 days from today\. File a written response with the court\./);
+    const c = await d.handle("how did you count?");
+    assert.match(c.say, /^Here's how I counted\. Served Monday, September 21, 2026\. The day you are served does not count\. 30 days from the day you were served: Wednesday, October 21, 2026\./);
+    assert.equal((await d.handle("no thanks")).done, true);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a jury summons ends the call when there's nothing else", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    await d.handle("I have jury duty");
+    const r = await d.handle("no");
+    assert.equal(r.done, true); assert.match(r.say, /not legal advice/);
   } finally { await mcp.close(); }
 });
 

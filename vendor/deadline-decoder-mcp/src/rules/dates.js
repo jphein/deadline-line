@@ -1,6 +1,5 @@
-// Vendored from jphein/deadline-decoder-mcp (commit 7c377f8, published under MIT; src/ is unchanged
-// through that repo's later AGPL relicense). Licensed MIT by its author, Jeffrey Pine Hein, for this project.
-// See vendor/deadline-decoder-mcp/LICENSE. Upstream edits belong upstream; re-vendor rather than patch here.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 9e46772), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // dates.js — deadline arithmetic. Pure functions, no DOM, tested in tests/dates.test.mjs.
 // All dates are local calendar dates handled as UTC-midnight Date objects to avoid DST drift.
 
@@ -70,12 +69,28 @@ export function federalHolidays(y) {
   return new Map(list.map(([dt, name]) => [iso(dt), name]));
 }
 
+// Legal holidays in the District of Columbia (D.C. Code § 1-612.02): the federal ones, plus D.C. Emancipation
+// Day (April 16, observed on the nearest weekday) and Inauguration Day (January 20 every fourth year; the 21st
+// when the 20th is a Sunday). Tax deadlines roll past these (26 U.S.C. §§ 6213(a), 7503).
+export function dcHolidays(y) {
+  const m = federalHolidays(y);
+  m.set(iso(observed(d(`${y}-04-16`))), "D.C. Emancipation Day");
+  if ((y - 2021) % 4 === 0) { const jan20 = d(`${y}-01-20`); m.set(iso(dow(jan20) === 0 ? addDays(jan20, 1) : jan20), "Inauguration Day"); }
+  return m;
+}
+
 function holidayName(date, fn) {
   const y = date.getUTCFullYear();
   return fn(y).get(iso(date)) || fn(y + 1).get(iso(date)) || null;
 }
 export function isCourtDay(date) { const w = dow(date); return w !== 0 && w !== 6 && !holidayName(date, caCourtHolidays); }
 export function isFederalWorkday(date) { const w = dow(date); return w !== 0 && w !== 6 && !holidayName(date, federalHolidays); }
+export function isDcBusinessDay(date) { const w = dow(date); return w !== 0 && w !== 6 && !holidayName(date, dcHolidays); }
+export function whyNotWorkday(date) {
+  const w = dow(date);
+  return w === 0 ? "Sunday" : w === 6 ? "Saturday"
+    : holidayName(date, federalHolidays) || holidayName(date, caCourtHolidays) || holidayName(date, dcHolidays);
+}
 
 // Count n court days, starting the day AFTER `from` (Code Civ. Proc. § 12). Returns the
 // last day plus the skipped days, so the page can show its working.
@@ -93,8 +108,7 @@ export function addCourtDays(from, n) {
 export function addDaysRolling(from, n, ok) {
   let x = addDays(from, n); const rolled = [];
   while (!ok(x)) {
-    rolled.push({ date: iso(x), why: dow(x) === 0 ? "Sunday" : dow(x) === 6 ? "Saturday"
-      : (holidayName(x, federalHolidays) || holidayName(x, caCourtHolidays)) });
+    rolled.push({ date: iso(x), why: whyNotWorkday(x) });
     x = addDays(x, 1);
   }
   return { date: x, rolled };
@@ -102,6 +116,9 @@ export function addDaysRolling(from, n, ok) {
 
 export function fmt(date) {
   return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+export function fmtDay(date) {                   // "Monday, November 2": a nearby day, said aloud
+  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
 }
 export function fmtShort(date) {
   return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
