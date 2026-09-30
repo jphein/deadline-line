@@ -54,6 +54,8 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["I got a notice of trustee's sale", "no"],
       ["my HOA sent a notice of default", "no"],
       ["the HOA is auctioning my condo for unpaid assessments", "no"],
+      ["my homeowners association sent a notice of trustee's sale", "no"],
+      ["my HOA sent me a letter", "a notice of default", "no"],
       ["EDD says I'm not eligible for unemployment, the notice was mailed September 10th", "bye"],
       ["I got a notice to vacate", "sixty days", "September 1st"],
     ];
@@ -76,12 +78,14 @@ test("api/decode: the SSA sample gives the real date, explains on request, and s
 test("api/decode GET: the greeting and a new conversation", T, async () => {
   const r = await decodeApi.GET(req("/api/decode"));
   assert.equal(r.status, 200); assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null } });
+  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false } });
 });
 
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
-    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null });
+    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null, hoa: false });
+  // Only a real boolean true survives as the HOA flag.
+  for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoa: v }).hoa, want, String(v));
   assert.deepEqual(cleanState({ letter: "ssa-initial", date: "2026-09-13", awaiting: "more", last: "x".repeat(5000) }).last.length, 2000);
   assert.deepEqual(cleanState("nope"), {});
   const r = await decodeApi.POST(req("/api/decode", { body: { transcript: "yes", state: { letter: "x", awaiting: "more", result: { how_we_counted_spoken: "lies" } }, today: TODAY } }));
@@ -250,4 +254,11 @@ test("api/*.js: Web handlers that read the key when a request arrives", T, async
 test("healthHandler: mode direct, the platform, and whether the key is set", async () => {
   assert.deepEqual(await healthHandler({ ASSEMBLYAI_API_KEY: "k" }, "vercel")().json(), { ok: true, stt: "assemblyai", mode: "direct", platform: "vercel" });
   assert.deepEqual(await healthHandler({}, "cloudflare-workers")().json(), { ok: true, stt: "missing key", mode: "direct", platform: "cloudflare-workers" });
+});
+
+test("api/decode: an HOA mentioned on one turn is still heard when the notice is named on the next", T, async () => {
+  const out = await converse(decodeApi.POST, ["my HOA sent me a letter", "a notice of default"], "2026-09-30");
+  assert.match(out[1].say, / If your homeowners association is foreclosing without going to court over assessments that came due from 2006 on, you may still be able to redeem the home for 90 days after the sale, and the notice of sale is supposed to mention that right\. Ask legal aid right away\. /);
+  const plain = await converse(decodeApi.POST, ["I got a letter", "a notice of default"], "2026-09-30");
+  assert.ok(!plain[1].say.includes("homeowners association"));
 });

@@ -368,16 +368,47 @@ test("dialog: 'I read it again and it says September 28th' is a date answer, not
   } finally { await mcp.close(); }
 });
 
-test("dialog: an HOA's foreclosure gets the same spoken answer as a deed of trust; the § 5715 step rides in next_steps", async () => {
+test("dialog: a caller who says HOA hears the § 5715 redemption right; a plain deed-of-trust caller doesn't", async () => {
   const mcp = await startMcp();
   try {
     const say = async (x) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const a = await d.handle(x); return [d, a]; };
-    const [plain, plainA] = await say("I got a notice of default on my house");
-    const [hoa, hoaA] = await say("my HOA sent a notice of default");
-    assert.equal(hoa.letter, "ca-foreclosure-nod");
-    assert.equal(hoaA.say, plainA.say);
-    assert.ok(hoa.result.next_steps.some(s => /^If your homeowners association is foreclosing without going to court over assessments that came due from 2006 on, you may still be able to redeem the home for 90 days after the sale/.test(s)));
-    const [sale] = await say("the HOA is auctioning my condo for unpaid assessments");
-    assert.equal(sale.letter, "ca-foreclosure-sale");
+    const STEP = "If your homeowners association is foreclosing without going to court over assessments that came due from 2006 on, you may still be able to redeem the home for 90 days after the sale, and the notice of sale is supposed to mention that right. Ask legal aid right away.";
+    for (const [x, id] of [["my HOA sent a notice of default", "ca-foreclosure-nod"], ["the HOA is auctioning my condo for unpaid assessments", "ca-foreclosure-sale"],
+      ["my homeowners association sent a notice of trustee's sale", "ca-foreclosure-sale"]]) {
+      const [d, a] = await say(x);
+      assert.equal(d.letter, id, x);
+      assert.ok(a.say.includes(` ${STEP} `), x);
+      assert.equal(a.say.split(STEP).length, 2, `${x}: said once`);
+      assert.ok(d.result.next_steps.includes(STEP), `${x}: the engine's own step`);
+    }
+    // Two turns: the HOA is named first, the notice on the next turn (the flag rides in the state).
+    const two = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await two.handle("my HOA sent me a letter");
+    const second = await two.handle("a notice of default");
+    assert.equal(two.letter, "ca-foreclosure-nod");
+    assert.equal(second.say.split(STEP).length, 2, "two turns: said once");
+    assert.equal(two.snapshot().hoa, false, "cleared once said");
+    // Two letters in one call: the HOA mention belongs to the first, so the second (a deed of trust) has no HOA text.
+    const both = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await both.handle("my HOA is suing me in small claims");
+    await both.handle("yes");
+    assert.ok(!(await both.handle("I got a notice of default on my house")).say.includes("homeowners association"), "after another answered letter");
+    const sw = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await sw.handle("my HOA sent me a rent increase notice");
+    assert.ok(!(await sw.handle("no, it's a notice of default on my house")).say.includes("homeowners association"), "after switching letters");
+    for (const x of ["I got a notice of default on my house", "I got a notice of trustee's sale"]) {
+      const [, a] = await say(x);
+      assert.ok(!a.say.includes("homeowners association"), x);
+    }
+  } finally { await mcp.close(); }
+});
+
+test("dialog: 'I got a UD.' (as speech ends, with a period) is heard as eviction papers", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const a = await d.handle("I got a UD.");
+    assert.equal(d.letter, "ca-ud");
+    assert.match(a.say, /^Got it: California: court papers for an eviction \(Summons, unlawful detainer\)\./);
   } finally { await mcp.close(); }
 });

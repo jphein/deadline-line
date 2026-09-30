@@ -11,6 +11,9 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
 const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
+const HOA = /\b(HOA|homeowners'? association|association)\b/i;
+const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
+const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
 
 export const GREETING = "Deadline Line. Tell me what kind of letter you got and the date on it. For example: " +
@@ -24,16 +27,17 @@ export class Dialog {
     this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.last = GREETING;
     this.candidates = [];         // the kinds a "which one?" question offered, so the answer is matched among them
     this.dateQuestion = null;     // how to ask for this letter's date ("What day were the papers handed to you?")
+    this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
   say(text, done = false) { this.last = text; return { say: text, done }; }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
-    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion };
+    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa };
   }
 
   /** Pick a conversation back up from snapshot(). */
@@ -41,7 +45,7 @@ export class Dialog {
     const dialog = new Dialog(callTool, opts);
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
-    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null;
+    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true;
     if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
     return dialog;
   }
@@ -74,10 +78,12 @@ export class Dialog {
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
-    if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
+    // A different letter than the one we were on: an earlier HOA mention was about that one, not this.
+    if (det.recognized && det.letter_type !== this.letter) { if (this.letter) this.hoa = false; this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
-    if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer();
+    if (HOA.test(t)) this.hoa = true;   // "my HOA sent me a letter" → "what kind?" → "a notice of default"
+    if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
       this.awaiting = "date";
@@ -97,7 +103,7 @@ export class Dialog {
     return (this.result = { ...r, how_we_counted_spoken: counted });
   }
 
-  async answer() {
+  async answer(said = "") {
     const r = await this.compute();
     const counted = r.how_we_counted.length > 0;
     this.awaiting = counted ? "more" : "another";
@@ -110,7 +116,11 @@ export class Dialog {
     const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
-    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
+    // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).
+    // The HOA mention may come on an earlier turn than the answer, so it's carried in the state (cleanState keeps it).
+    const hoa = HOA_LETTERS.has(r.letter_type) && (this.hoa || HOA.test(said)) ? r.next_steps.find(s => HOA_STEP.test(s)) : null;
+    this.hoa = false;                   // said once, for this letter
+    return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]}${hoa ? ` ${hoa}` : ""} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
