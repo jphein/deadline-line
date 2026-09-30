@@ -9,7 +9,12 @@ const dir = new URL("../vendor/deadline-decoder-mcp/", import.meta.url);
 const sha = (buf) => createHash("sha256").update(buf).digest("hex");
 
 test("the vendored engine matches its recorded upstream files byte for byte", () => {
-  const lines = readFileSync(new URL("UPSTREAM.sha256", dir), "utf8").split("\n").filter(l => l && !l.startsWith("#"));
+  const manifest = readFileSync(new URL("UPSTREAM.sha256", dir), "utf8");
+  // The headers must cite the same upstream commit the hashes were recorded from (and a branch, not "HEAD").
+  const recorded = manifest.match(/^# jphein\/deadline-decoder-mcp (\S+) @ ([0-9a-f]{40})$/m);
+  assert.ok(recorded, "UPSTREAM.sha256 names the upstream branch and commit");
+  assert.notEqual(recorded[1], "HEAD", "vendored from a branch, not a detached checkout");
+  const lines = manifest.split("\n").filter(l => l && !l.startsWith("#"));
   assert.equal(lines.length, 6);
   for (const line of lines) {
     const [want, file] = line.split(/\s+/);
@@ -17,7 +22,10 @@ test("the vendored engine matches its recorded upstream files byte for byte", ()
     if (file !== "LICENSE") {
       const rows = text.split("\n");
       const at = rows[0].startsWith("#!") ? 1 : 0;
-      assert.match(rows[at], /^\/\/ Vendored from jphein\/deadline-decoder-mcp \(/, `${file}: header`);
+      const cited = rows[at].match(/^\/\/ Vendored from jphein\/deadline-decoder-mcp \((\S+) @ ([0-9a-f]+)\)/);
+      assert.ok(cited, `${file}: header`);
+      assert.equal(cited[1], recorded[1], `${file}: header cites the recorded branch`);
+      assert.ok(recorded[2].startsWith(cited[2]), `${file}: header cites ${cited[2]}, the hashes are from ${recorded[2]}`);
       assert.match(rows[at + 1], /^\/\/ Upstream edits belong upstream/, `${file}: header`);
       rows.splice(at, 2);
       text = rows.join("\n");

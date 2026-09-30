@@ -345,9 +345,24 @@ test("dialog: a request to repeat still repeats; 'denied me again' is heard as w
     const e = new Dialog(mcp.callTool, { today: "2026-09-30" });
     assert.doesNotMatch((await e.handle("social security denied my disability again")).say, /^Deadline Line\./);
     // Words that sound like it but aren't a request: a denial again, "they said no again", "what" inside a sentence.
-    for (const x of ["they said no again", "social security turned me down again", "what do I do about my eviction papers"]) {
+    for (const x of ["they said no again", "social security turned me down again", "what do I do about my eviction papers",
+      "they say I owe again, social security overpaid me", "I read the letter again and it says I have 30 days", "they say it again and again"]) {
       const f = new Dialog(mcp.callTool, { today: "2026-09-30" });
       assert.doesNotMatch((await f.handle(x)).say, /^Deadline Line\./, x);
     }
+  } finally { await mcp.close(); }
+});
+
+test("dialog: 'I read it again and it says September 28th' is a date answer, not a request to repeat", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await d.handle("I got a 3 day notice");
+    const a = await d.handle("I read it again and it says September 28th");
+    assert.equal(d.date, "2026-09-28");
+    assert.doesNotMatch(a.say, /^Got it: California: a 3-day notice/);
+    const e = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    assert.equal((await e.handle("they say I owe again, social security overpaid me")).say.startsWith("Deadline Line."), false);
+    assert.equal(e.letter, "ssa-overpayment");
   } finally { await mcp.close(); }
 });
