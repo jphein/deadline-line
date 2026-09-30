@@ -131,7 +131,7 @@ test("dialog: unknown letter asks which kind; repeat works", async () => {
   try {
     const d = new Dialog(mcp.callTool, { today: TODAY });
     const a = await d.handle("hi, I got some kind of letter and I'm worried");
-    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it from Social Security, a landlord, a court, or the county about Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
+    assert.match(a.say, /^I couldn't tell which kind of letter that is\. Is it about Social Security, your rent or your home, a court case or jury duty, a parking ticket, unemployment benefits, taxes or the IRS, or Medi-Cal, CalFresh or CalWORKs\? And what date is on it\?$/);
     const b = await d.handle("can you repeat that");
     assert.equal(b.say, a.say);
   } finally { await mcp.close(); }
@@ -173,6 +173,35 @@ test("dialog: a jury summons ends the call when there's nothing else", async () 
     await d.handle("I have jury duty");
     const r = await d.handle("no");
     assert.equal(r.done, true); assert.match(r.say, /not legal advice/);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a bare IRS letter asks which one; a levy notice gets its hearing date", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    assert.equal((await d.handle("I got a letter from the IRS")).say, "Is it a CP2000 about proposed changes to your return, a Notice of Deficiency, or a final notice before a levy?");
+    assert.match((await d.handle("a final notice before a levy")).say, /^Got it: IRS: a final notice of intent to levy \(and your right to a hearing\)\. What date is on it\?/);
+    const a = await d.handle("September 15th");                          // Sep 15 + 30 = Thu Oct 15
+    assert.match(a.say, /^Your deadline is Thursday, October 15, 2026\. That's 19 days from today\. Ask for a Collection Due Process hearing\./);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a rent increase leads with the earliest date and adds the 90-day one", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    const a = await d.handle("my landlord says my rent is going up, the notice was handed to me on September 15th");
+    assert.match(a.say, /^If the increase is 10 percent or less, the new rent can't start before Thursday, October 15, 2026, 19 days from today\. Keep paying your current rent until the new rent can start\. If it's more than 10 percent, it can't start before Monday, December 14, 2026, 90 days after you got the notice\. First step: /);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: an overpayment says the appeal date and the 30-day date", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: TODAY });
+    const a = await d.handle("Social Security says they overpaid me, the letter is dated September 13th");
+    assert.match(a.say, /^Your deadline is Tuesday, November 17, 2026\. That's 52 days from today\. Appeal it if it's wrong, or ask for a waiver\. For Social Security benefits \(not SSI\), ask by Tuesday, October 13, 2026, 30 days after the date on the notice, and they won't start taking money back while they decide\. First step: /);
   } finally { await mcp.close(); }
 });
 
