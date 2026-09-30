@@ -281,3 +281,20 @@ test("resample 22.05 kHz to 8 kHz keeps duration", () => {
   const one = Buffer.alloc(22050 * 2);
   assert.equal(resample(one, 22050, 8000).length, 8000 * 2);
 });
+
+test("dialog: the help line reads as a sentence, and a date said as an event isn't the letter's date", async () => {
+  const mcp = await startMcp();
+  try {
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    const a = await d.handle("I got a jury summons, I have to report October 1st");
+    assert.match(a.say, / For questions, call your court's jury office: the phone number and website are printed on your summons\. Do you have another letter/);
+    assert.doesNotMatch(a.say, /For free help, Your|2025/);
+    assert.equal(d.date, null);
+    d.reset();
+    const b = await d.handle("I got a rent increase notice and my rent goes up November 1st");
+    assert.match(b.say, /^Got it: California: a notice that your rent is going up\. What day was the notice handed to you\?/);   // it asks for the notice's date instead of using November 1st
+    const c = await d.handle("I got it yesterday");                    // Tue Sep 29 + 30 = Thu Oct 29
+    assert.match(c.say, /October 29, 2026/);
+    assert.match(c.say, / For free help: Legal Services of Northern California, free civil legal aid, lsnc\.net or call your local office\. /);
+  } finally { await mcp.close(); }
+});
