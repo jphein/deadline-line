@@ -443,6 +443,13 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
     const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
     assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
     assert.equal(await said(["my HOA sent a notice of default", "it's from my HOA"]), 1);
+    // A finished conversation (the goodbye, or the text-me close) doesn't carry its HOA mention, or its step, into the next.
+    const replies = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const out = []; for (const t of turns) out.push(await d.handle(t)); return out; };
+    const done = await replies(["my HOA sent a notice of default", "no", "I got a notice of default on my house", "it's from my HOA"]);
+    assert.equal(done[1].done, true);
+    assert.deepEqual(done.map(times), [1, 0, 0, 1]);
+    assert.doesNotMatch(done[3].say, /I've included/);
+    assert.deepEqual((await replies(["my HOA sent me a letter", "goodbye", "I got a notice of default on my house"])).map(times), [0, 0, 0]);
     // A new letter gets its own step.
     assert.equal(await said(["my HOA sent a notice of default", "yes", "my HOA sent a notice of trustee's sale"]), 2);
     // The HOA named first, then the notice turns out to be the lender's: no step.

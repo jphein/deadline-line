@@ -40,7 +40,11 @@ export class Dialog {
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
-  say(text, done = false) { this.last = text; return { say: text, done }; }
+  say(text, done = false) {
+    this.last = text;
+    if (done) { this.hoa = false; this.hoaSaid = false; }   // a finished conversation's HOA mention isn't the next one's
+    return { say: text, done };
+  }
   reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
