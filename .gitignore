@@ -3,3 +3,4 @@ scratch/
 *.log
 .env
 asterisk/demo-auth.conf
+.vercel

@@ -80,6 +80,31 @@ export function demoLimits(cfg = demoConfig(), now = () => Date.now()) {
   };
 }
 
+/** Guardrails for the Vercel demo's token endpoint (src/vercel.js). There the page streams to AssemblyAI itself,
+ *  so no server sees a conversation start or end; what can be counted is tokens: per visitor per hour, and per UTC
+ *  day (the daily budget divided by the longest session one token allows). The session cap itself is enforced by
+ *  AssemblyAI. Counts live in memory, so they are per function instance: best effort, not a hard cap. */
+export function tokenLimits(cfg = demoConfig(), now = () => Date.now()) {
+  let day = "", issued = 0;
+  const starts = new Map();      // ip -> token times (ms) in the last hour
+  const perDay = Math.max(1, Math.floor(cfg.dailyS / Math.max(60, cfg.sessionMaxS)));
+  return {
+    cfg, perDay,
+    /** May `ip` have another token now? Counts it if so. */
+    allow(ip) {
+      const t = now(), d = new Date(t).toISOString().slice(0, 10);
+      if (d !== day) { day = d; issued = 0; }
+      if (issued >= perDay) return { ok: false, reason: "budget" };
+      const mine = (starts.get(ip) || []).filter(x => t - x < 3600e3);
+      starts.set(ip, mine);
+      if (mine.length >= cfg.perIpPerHour) return { ok: false, reason: "perIp" };
+      mine.push(t); issued += 1;
+      if (starts.size > 10000) for (const [k, v] of starts) if (!v.some(x => t - x < 3600e3)) starts.delete(k);
+      return { ok: true };
+    },
+  };
+}
+
 /** The visitor's address. Behind N trusted proxies (TRUST_PROXY=N), use the Nth X-Forwarded-For entry from
  *  the right: each proxy appends the address it saw, so entries further left could be forged by the client. */
 export function clientIp(req, env = process.env) {

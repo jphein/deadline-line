@@ -21,6 +21,19 @@ export class Dialog {
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
   say(text, done = false) { this.last = text; return { say: text, done }; }
 
+  /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
+   *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
+  snapshot() { return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last }; }
+
+  /** Pick a conversation back up from snapshot(). */
+  static async restore(callTool, snap = {}, opts = {}) {
+    const dialog = new Dialog(callTool, opts);
+    dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
+    dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
+    if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
+    return dialog;
+  }
+
   async handle(text) {
     const t = (text || "").trim();
     if (!t) return this.say("Sorry, I didn't hear anything. " + GREETING);
@@ -56,11 +69,15 @@ export class Dialog {
       : "I can help with letters from Social Security, a landlord's three day notice, eviction court papers, or Medi-Cal and CalFresh. Which one did you get, and what date is on it?");
   }
 
-  async answer() {
+  async compute() {
     const r = await this.call("compute_deadline", this.args({ letter_type: this.letter, notice_date: this.date }));
     // compute_deadline's speech is complete but long; on the phone, lead with the date and offer the rest.
     const counted = r.speech.match(/Here's how I counted\. (.*?) First step:/s)?.[1] ?? r.how_we_counted.join(" ");
-    this.result = { ...r, how_we_counted_spoken: counted };
+    return (this.result = { ...r, how_we_counted_spoken: counted });
+  }
+
+  async answer() {
+    const r = await this.compute();
     this.awaiting = "more";
     const head = r.passed
       ? `That deadline was ${r.deadline_spoken}. It may not be too late: ask for more time in writing, and call free legal aid today.`
