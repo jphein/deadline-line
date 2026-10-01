@@ -12,7 +12,6 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 // "what did you say", "sorry, what?", or a bare "again", "huh" or "what". "They denied me again" isn't one.
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
-const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
 // "H.O.A." in any case; the bare "HOA" in capitals or lowercase, never "Hoa" (a given name); ASR's spaced
@@ -113,7 +112,10 @@ export class Dialog {
     if (REPEAT.test(t) && !/\bdated\b|\bletter\b/i.test(t)) return this.say(this.last);
     // A yes, no or goodbye that also names a letter ("no, but I also got an eviction summons", "thanks, I also got an
     // unlawful detainer") is about that letter, not an answer to the question: the decoder decides, not a word list.
-    const named = (YES.test(t) || NO.test(t) || BYE.test(t)) && await this.namesLetter(t);
+    // Right after an answer ("explain how I counted?", the text offer), the letter just answered doesn't count: "no, I
+    // understand the 3 day notice" is a no. At the other stages it does ("yes, I also got a 3 day notice" at the stop offer).
+    const current = this.awaiting === "more" || this.awaiting === "text" ? this.letter : null;
+    const named = (YES.test(t) || NO.test(t) || BYE.test(t)) && await this.namesLetter(t, current);
     // "No" to the date question twice: go on to a letter the caller also named, or offer to stop, not the same ask again.
     const saidNo = this.dateNo; this.dateNo = false;
     if (this.awaiting === "date" && NO.test(t) && !named) {
@@ -145,7 +147,7 @@ export class Dialog {
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
     // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
-    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !LETTERISH.test(t)) {
+    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !(await this.namesLetter(t))) {
       const r = this.result ?? await this.compute();
       const step = r.next_steps.find(s => HOA_STEP.test(s));
       const ask = this.awaiting === "more" ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
@@ -162,7 +164,7 @@ export class Dialog {
       // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
       if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !named) {
         if (YES.test(t)) return this.startCarry("");
-        if (NO.test(t)) return this.goodbye(`When you're ready, call back about ${(await this.letterInfo(carry[0])).short.replace(/^an? /, "the ")}. `);
+        if (NO.test(t)) return this.goodbye(`Act by the date printed on ${(await this.letterInfo(carry[0])).short.replace(/^an? /, "the ")}, and call back any time about it. `);
       }
       if (!carry.length && NO.test(t) && !named) return this.goodbye();
       this.reset();
@@ -278,8 +280,11 @@ export class Dialog {
   goodbye(before = "") { this.awaiting = null; return this.say("Okay. " + before + this.closing(), true); }
 
   /** Does this turn name a letter, as the decoder hears it (a letter, a which-kind question, or one carried)? */
-  async namesLetter(t) {
-    const det = await this.call("detect_letter", this.args({ text: t }));
-    return Boolean(det.recognized || det.candidates?.length || det.also_detected?.length || det.also_asks?.length);
+  async namesLetter(t, current = null) {
+    // A failed or empty detection names nothing: the plain yes, no or goodbye is answered as before.
+    let det;
+    try { det = await this.call("detect_letter", this.args({ text: t })); } catch { return false; }
+    if (det?.candidates?.length || det?.also_detected?.length || det?.also_asks?.length) return true;
+    return Boolean(det?.recognized && det.letter_type !== current);
   }
 }
