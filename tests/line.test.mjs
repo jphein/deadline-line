@@ -603,6 +603,16 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     assert.equal(go[1].letter, "ca-foreclosure-nod"); assert.match(go[1].say, /^A Notice of Default starts the foreclosure clock/);
     const stop = await run(["I got a jury summons, plus a notice of default", "no"]);
     assert.equal(stop[1].done, true);
+    // A carried question: with nothing to count first, it's asked at once; after a counted answer, where the carried
+    // letter would come in; "no" twice at the date question goes on to it too.
+    const asked = await run(["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"]);
+    assert.match(asked[0].say, /You also mentioned a summons or court papers; tell me about that next\. Is it about an eviction, a lawsuit about money, or jury duty\?$/);
+    assert.equal(asked[0].letter, null); assert.equal(asked[1].letter, "ca-civil-summons"); assert.match(asked[2].say, /^Your deadline is Monday, October 26, 2026\./);
+    const later = await run(["I got a 3 day notice, I also got a summons", "September 28", "no", "a lawsuit about money"]);
+    assert.match(later[1].say, /You also mentioned a summons or court papers; tell me about that next\. Want me to explain how I counted\?$/);
+    assert.equal(later[2].say, "Okay. Is it about an eviction, a lawsuit about money, or jury duty?"); assert.equal(later[3].letter, "ca-civil-summons");
+    const irs = await run(["I got a 3 day notice, plus a letter from the IRS", "no", "no"]);
+    assert.equal(irs[2].say, "Okay. Is it a CP2000 about proposed changes to your return, a Notice of Deficiency, or a final notice before a levy?");
     // A carried letter with no date to ask for is answered when it's reached.
     const nod = await run(["social security denied my disability, I also got a notice of default", "September 20", "yes", "no"]);
     assert.match(nod[1].say, /You also mentioned a Notice of Default; tell me about that next\./);

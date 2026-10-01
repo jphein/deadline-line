@@ -34,6 +34,9 @@ const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
 const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
+// A carried question ("…, I also got a summons": eviction, lawsuit or jury?) is kept as "ask:<its group's label>"; the
+// question and its candidates are the rules' own, looked up here, never taken from the state the page sends back.
+export const CARRIED_ASKS = new Map(AMBIGUOUS.filter(g => g.label).map(g => [`ask:${g.label}`, g]));
 
 export const GREETING = "Deadline Line. Tell me what kind of letter you got and the date on it. For example: " +
   "a letter from Social Security dated September 13th, or eviction papers handed to me yesterday.";
@@ -169,7 +172,8 @@ export class Dialog {
     // After an answer, a "which one?" is about a new letter ("the summons"): not the one just answered.
     if (answered && this.candidates.length) { this.letter = null; this.date = null; }
     // A second letter named in the same turn is carried, to be taken up after this one.
-    if (det.also_detected?.length) this.carry = det.also_detected;
+    const also = [...(det.also_detected ?? []), ...(det.also_asks ?? []).map(a => `ask:${a.label}`)].filter(c => !c.startsWith("ask:") || CARRIED_ASKS.has(c));
+    if (also.length) this.carry = also;
     if (this.carry.length && det.recognized) this.carry = this.carry.filter(id => id !== det.letter_type);
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
@@ -215,9 +219,12 @@ export class Dialog {
         : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
     // What's said about a carried letter is built here, from its id: never a sentence the page sent back.
     const carried = this.carry.length ? `${await this.carryLine()} ` : "";
-    const undated = this.carry.length && (await this.letterInfo(this.carry[0])).needs_date === false;
+    const firstAsk = CARRIED_ASKS.get(this.carry[0]);
+    const undated = this.carry.length && !firstAsk && (await this.letterInfo(this.carry[0])).needs_date === false;
     const next = carried + (counted ? "Want me to explain how I counted?" : !this.carry.length ? "Do you have another letter I can help with?"
-      : undated ? "Want me to go on to it?" : "What date is on it?");
+      : firstAsk ? firstAsk.question : undated ? "Want me to go on to it?" : "What date is on it?");
+    // Nothing to count and a question carried: that question is open now.
+    if (!counted && firstAsk) { this.carry = this.carry.slice(1); this.candidates = firstAsk.candidates; this.awaiting = "letter"; this.letter = null; this.date = null; }
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
     // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).
@@ -231,7 +238,10 @@ export class Dialog {
   /** Take up the letter the caller also named: ask its date (or answer it, when it has none). */
   async startCarry(prefix) {
     const [id, ...rest] = this.carry;
-    this.reset(); this.carry = rest; this.letter = id;
+    this.reset(); this.carry = rest;
+    const ask = CARRIED_ASKS.get(id);
+    if (ask) { this.candidates = ask.candidates; this.awaiting = "letter"; return this.say(`${prefix}${ask.question}`); }
+    this.letter = id;
     const info = await this.letterInfo(id);
     if (info.needs_date === false) { const a = await this.answer(); return this.say(prefix + a.say); }
     this.awaiting = "date";
@@ -247,7 +257,7 @@ export class Dialog {
   /** "You also mentioned …; tell me about that next.", from the carried ids and the engine's titles. */
   async carryLine() {
     const names = [];
-    for (const id of this.carry) names.push((await this.letterInfo(id)).short);
+    for (const id of this.carry) names.push(CARRIED_ASKS.get(id)?.label ?? (await this.letterInfo(id)).short);
     return `You also mentioned ${names.join(" and ")}; tell me about that next.`;
   }
 

@@ -5,7 +5,7 @@
 // and posts each final transcript to /api/decode, which runs the same Dialog over the same vendored rules.
 // The conversation's state rides along with each request, so the functions remember nothing between turns.
 // The phone line and the full web demo (neural voice, server-side limits) still run on src/server.js.
-import { Dialog, GREETING } from "./dialog.js";
+import { Dialog, GREETING, CARRIED_ASKS } from "./dialog.js";
 import { AAI_WS_URL, KEYTERMS, streamingQuery } from "./streaming.js";
 import { demoConfig, tokenLimits, MESSAGES } from "./limits.js";
 import { detectLetter, computeDeadline, listLetterTypes, todayIso, DecoderError } from "../vendor/deadline-decoder-mcp/src/decoder.js";
@@ -55,7 +55,7 @@ export function cleanState(s) {
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)
   // The carried letters: real ids only, at most three. No sentence the page sends is spoken: its ids, dates and flags
   // only select the server's own text (a carrySpoken in the state is dropped).
-  const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
+  const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c) || CARRIED_ASKS.has(c)))].slice(0, 3) : [];
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt by Dialog.restore() from the letter and the stage.
   const dateNo = s.dateNo === true;                                   // "no" to the date question once (only a real boolean)
   return { letter, date, awaiting, candidates, hoa, hoaSaid, carry, dateNo };

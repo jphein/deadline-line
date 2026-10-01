@@ -59,6 +59,8 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["I got a notice of default on my house", "it's from my HOA", "no"],
       ["I got a 3 day notice", "no", "no", "no", "September 28"],
       ["I got a 3 day notice", "no", "no", "say that again", "yes"],
+      ["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"],
+      ["I got a 3 day notice, I also got a summons", "September 28", "no", "a lawsuit about money"],
       ["I got a notice of default on my house", "it's from my HOA", "it's from my HOA", "no"],
       ["my HOA sent a notice of default", "it's from my HOA", "no"],
       ["my friend Hoa helped me read the notice of default on my house", "no"],
@@ -155,6 +157,8 @@ test("api/decode: a state the page tampered with is cleaned, not trusted", T, as
   assert.deepEqual(cleanState({ carry: ["ca-3day", "nope", "ca-3day", "ca-ud", "jury-summons", "ca-noa"] }).carry, ["ca-3day", "ca-ud", "jury-summons"]);
   assert.deepEqual(cleanState({ carry: "ca-3day" }).carry, []);
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [undefined, false]]) assert.equal(cleanState({ dateNo: v }).dateNo, want, String(v));
+  // A carried question only by a label the rules know: the question and its candidates are the server's.
+  assert.deepEqual(cleanState({ carry: ["ask:a summons or court papers", "ask:INJECTED TEXT", "INJECTED TEXT"] }).carry, ["ask:a summons or court papers"]);
   // A carrySpoken in the state is dropped: the line about a carried letter is the server's own.
   assert.equal("carrySpoken" in cleanState({ carry: ["ca-civil-summons"], carrySpoken: "INJECTED TEXT" }), false);
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt on the server.
