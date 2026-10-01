@@ -42,7 +42,7 @@ const DIRECT_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok"
   "dated", "i", "got", "received", "they", "served", "handed", "delivered", "posted", "mailed", "gave", "me", "to", "landlord", "my",
   "notice", "letter", "papers", "this", "that", "that's", "a", "an", "from", "for", "of", "with", "and", "by", "sent", "we", "our",
   "us", "you", "your", "here", "says", "say", "on", "in", "at", "be", "been", "came", "come", "were", "them", "him", "her",
-  "also", "just", "to", "plus", "over", "off", "dropped"]);
+  "also", "just", "to", "plus", "over", "off", "dropped", "given"]);
 // Letter-specific: "printed" / "mailing" only for a letter counted from its printed or mailing date (Social Security,
 // Medi-Cal, IRS, the Franchise Tax Board, EDD, a utility, parking); "due" only for the water bill, counted from its due
 // date. For a hand-over letter ("The date printed on the notice is September 3", "The notice is due September 3") they
@@ -68,20 +68,43 @@ const YES_REST = new Set(["i", "yes", "yeah", "yep", "yup", "sure", "correct", "
 // …or plain receipt phrasing with a receipt verb in it ("yes, that's when I got it", "yes, that's the day they gave it to
 // me"); never "due", "paid" or "printed" ("yes, that's when I paid"), and nothing without a receipt verb ("yes, the date
 // on it" says which date, not that the held one is right).
-const RECEIPT_VERB = /\b(?:got|received|handed|gave|served|delivered|posted|mailed|came|dropped|sent)\b/i;
+const RECEIPT_VERB = /\b(?:got|received|handed|gave|given|served|delivered|posted|mailed|came|dropped|sent)\b/i;
 const yesRemainderOk = (words) => {
   const receipt = words.some(w => RECEIPT_VERB.test(w));
   return words.every(w => YES_REST.has(w) || (receipt && (DIRECT_WORDS.has(w) || w === "when" || w === "day" || w === "then")));
 };
 // The caller's own sending ("I sent the notice to my landlord on September 3") isn't the day it reached them: the check.
 // (Not a receipt said in the passive: "I was handed eviction papers", "we got it sent".)
-// (Through "have / 've / had / just / already": "I have sent my landlord notice", "I've mailed it to the landlord". Not a
+// (Through "have / 've / had" and up to six more words, adverbs or fillers in any order ("I um actually also just mailed"): "I have sent my landlord notice", "I also just sent
+// it", "I've mailed it to the landlord"; not past another subject: "I think they sent it". Not a
 // receipt said in the passive: "I have been handed", "I was handed".)
-const SELF_SENT_FIRST = /\b(?:i|we)(?:'ve|'d)?\s+(?:(?:have|has|had|just|already|then)\s+)*(?:(?!was\b|were\b|got\b|been\b|am\b|are\b|have\b|has\b|had\b)\w+\s+)?(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
+const SELF_SENT_FIRST = /\b(?:i|we)(?:'ve|'d)?\s+(?:(?:have|has|had)\s+)*(?:(?!was\b|were\b|got\b|been\b|am\b|are\b|have\b|has\b|had\b|they\b|he\b|she\b|it\b|you\b|someone\b|somebody\b|who\b|that\b|the\b|a\b|an\b|my\b|his\b|her\b|their\b|our\b)\w+\s+){0,6}(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
 // …nor said the other way round: "My landlord received notice from me on September 3", "the landlord got it from me".
 // …and in the passive: "My notice was received by my landlord on September 3".
 const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:delivered|given|handed|sent|mailed)\s+to\s+(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\b|\b(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\s+(?:received|got|was given|was handed|was sent)\b|\b(?:received|got|signed for|signed|picked up|accepted)\s+by\s+(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\b/i;
-const SELF_SENT = { test: (t) => SELF_SENT_FIRST.test(t) || SENT_BY_CALLER.test(t) };
+// …nor a send to someone, whoever sends it and with any adverbs between ("I also just sent my landlord notice", "I then
+// mailed it to my landlord", "we finally dropped it at the office"): a send verb (not in the passive: "I was handed")
+// with a recipient after it in its clause, a recipient noun or "to <someone>" (in the passive only "to <someone>": "it
+// was mailed over to the landlord", not "I was handed it by the manager"), unless that recipient is "me / us"
+// ("they also sent it to me", "the landlord then handed it to me", "they just gave me the notice").
+const SEND_VERB = /\b(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed|took|brought)\b/gi;
+const PASSIVE_BEFORE = /\b(?:was|were|been|be|being|is|are|am|get|gets|got|getting)\s+(?:\w+\s+)?$/i;
+const TO_SOMEONE = /\bto\s+(?:him|her|them|my|the|our|his|their|a|an)\b/i;
+const RECIPIENT = { test: (s) => /\b(?:landlord|manager|property manager|owner|agency|lender|bank|office|court|lawyer|attorney|clerk|roommate|husband|wife|son|daughter)s?\b/i.test(s) || TO_SOMEONE.test(s) };
+// "by me / us", "by my husband" after a send verb is the caller's side sending: "it was mailed by me", "it was dropped
+// off by my husband".
+const BY_CALLER = /^(?:\s+[\w']+){0,3}?\s+by\s+(?:me|us|(?:my|our)\s+(?:husband|wife|partner|lawyer|attorney|roommate|son|daughter|mother|father))\b/i;
+const TO_ME = /^\s+(?:(?:it|them|this|that|one|the\s+\w+(?:\s+\w+)?|a\s+\w+|my\s+\w+(?:\s+\w+)?)\s+)?(?:back\s+)?(?:(?:to|over\s+to)\s+)?(?:me|us)\b/i;
+const SENT_TO_SOMEONE = { test: (t) => t.split(/[,.;!?]+|\b(?:and|but|because|so)\b/i).some(clause => {
+  for (const m of clause.matchAll(SEND_VERB)) {
+    const before = clause.slice(0, m.index), after = clause.slice(m.index + m[0].length);
+    if (TO_ME.test(after)) continue;
+    if (BY_CALLER.test(after)) return true;
+    if (PASSIVE_BEFORE.test(before) ? TO_SOMEONE.test(after) : RECIPIENT.test(after)) return true;
+  }
+  return false;
+}) };
+const SELF_SENT = { test: (t) => SELF_SENT_FIRST.test(t) || SENT_BY_CALLER.test(t) || SENT_TO_SOMEONE.test(t) };
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
 const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
 /** The words of `t` other than the given spans and relative days (lowercase, punctuation dropped). */
@@ -579,9 +602,16 @@ export class Dialog {
       }
       if (!date) return { kind: "unread" };
       // Direct only with one date and nothing but filler or receipt phrasing besides; else the check.
-      // "my notice says September 3" for a letter that states a later date of its own: the check ("says" right before the
-      // date; "my landlord says my rent is going up, the notice was handed to me on September 15th" is plain).
-      const statedDate = SAYS_STATED_DATE.has(det?.letter_type ?? this.letter) && /\b(?:says|say|said|reads|shows)\s+(?:that\s+|it'?s\s+|on\s+)?$/i.test(t.slice(0, cands[0].start));
+      // "my notice says September 3" for a letter that states a later date of its own: the check ("says" and up to five
+      // words in the same clause before the date: "says by", "says to be out by"; "my landlord says my rent is going up,
+      // the notice was handed to me on September 15th" is plain).
+      // A deadline preposition right before the date ("by September 3", "no later than September 3", "on or before the
+      // 3rd") names a date to act by, for every letter: the check. (For the water bill, "says it's due <date>" is its due
+      // date, the clock's start.)
+      const L = det?.letter_type ?? this.letter, before = t.slice(0, cands[0].start);
+      const dueDate = RULES.find(r => r.id === L)?.anchor === "due" && /\bdue\s+(?:on\s+)?$/i.test(before);
+      const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(before))
+        || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(before);
       const direct = cands.length === 1 && !statedDate && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
       return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
     }
