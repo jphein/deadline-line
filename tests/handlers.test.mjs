@@ -271,4 +271,7 @@ test("api/decode: an HOA mentioned on one turn is still heard when the notice is
   const steps = (out) => out.map(o => o.say).join(" ").split("If your homeowners association is foreclosing").length - 1;
   assert.equal(steps(await converse(decodeApi.POST, ["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"], "2026-09-30")), 1);
   assert.equal(steps(await converse(decodeApi.POST, ["my HOA sent a notice of default", "it's from my HOA"], "2026-09-30")), 1);
+  // A finished conversation's HOA mention doesn't carry into the next one on the same page.
+  assert.equal(steps(await converse(decodeApi.POST, ["my HOA sent me a letter", "goodbye", "I got a notice of default on my house"], "2026-09-30")), 0);
+  assert.equal(steps(await converse(decodeApi.POST, ["my HOA sent a notice of default", "no", "I got a notice of default on my house", "it's from my HOA"], "2026-09-30")), 2);
 });

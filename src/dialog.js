@@ -17,7 +17,10 @@ const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 // "H O A" only in capitals, since "ho a hearing" is ASR too.
 const HOA_ANYCASE = /\b(H\.\s?O\.\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
 const HOA_CASED = /\b(HOA|hoa|H O A)\b/;
-const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) };
+// ASR sometimes title-cases a spoken "hoa" that opens a sentence ("Hoa sent me the Notice of Default."): only there,
+// and only as the one sending or foreclosing, so the name ("Hoa is my name", "my friend Hoa") still isn't an HOA.
+const HOA_INITIAL = /(^|[.!?]\s+)Hoa (sent|mailed|gave|filed|is (foreclosing|selling|auctioning|suing))\b/;
+const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) || HOA_INITIAL.test(t) };
 // The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
 const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
@@ -40,7 +43,11 @@ export class Dialog {
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
-  say(text, done = false) { this.last = text; return { say: text, done }; }
+  say(text, done = false) {
+    this.last = text;
+    if (done) { this.hoa = false; this.hoaSaid = false; }   // a finished conversation's HOA mention isn't the next one's
+    return { say: text, done };
+  }
   reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo

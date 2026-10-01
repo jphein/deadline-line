@@ -435,14 +435,24 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
     // "Hoa" is a given name, not an HOA; the acronym is.
-    for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default"]) {
+    for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default",
+      "my friend Hoa sent me a photo of my notice of default"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
-    for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+    for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default",
+      // ASR's own output for a spoken "hoa" opening the sentence (measured, AssemblyAI streaming).
+      "Hoa sent me the Notice of Default.", "I got a notice of default. Hoa is foreclosing on my condo."]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
     // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
     const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
     assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
     assert.equal(await said(["my HOA sent a notice of default", "it's from my HOA"]), 1);
+    // A finished conversation (the goodbye, or the text-me close) doesn't carry its HOA mention, or its step, into the next.
+    const replies = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const out = []; for (const t of turns) out.push(await d.handle(t)); return out; };
+    const done = await replies(["my HOA sent a notice of default", "no", "I got a notice of default on my house", "it's from my HOA"]);
+    assert.equal(done[1].done, true);
+    assert.deepEqual(done.map(times), [1, 0, 0, 1]);
+    assert.doesNotMatch(done[3].say, /I've included/);
+    assert.deepEqual((await replies(["my HOA sent me a letter", "goodbye", "I got a notice of default on my house"])).map(times), [0, 0, 0]);
     // A new letter gets its own step.
     assert.equal(await said(["my HOA sent a notice of default", "yes", "my HOA sent a notice of trustee's sale"]), 2);
     // The HOA named first, then the notice turns out to be the lender's: no step.
@@ -476,6 +486,19 @@ test("dialog: a validation notice with the CFPB complaint line gets the validati
       "If you have a complaint about how we are collecting this debt, contact the CFPB at www.consumerfinance.gov or call 1-855-411-2372.");
     assert.equal(d.letter, "debt-validation");
     assert.doesNotMatch(a.say, /summons|court papers/i);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a validation notice's 'If you receive a summons' line gets the validation answer; a real summons still gets the summons answer", async () => {
+  const mcp = await startMcp();
+  try {
+    const notice = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await notice.handle("Example Collections LLC is a debt collector. We are trying to collect a debt that you owe to Example Bank. " +
+      "Call or write to us by October 30, 2026, to dispute all or part of the debt. If you receive a summons, do not ignore it.");
+    assert.equal(notice.letter, "debt-validation");
+    const summons = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await summons.handle("a debt collector sued me and I got a summons");
+    assert.equal(summons.letter, "ca-civil-summons");
   } finally { await mcp.close(); }
 });
 
