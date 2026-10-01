@@ -435,10 +435,13 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
     // "Hoa" is a given name, not an HOA; the acronym is.
-    for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default"]) {
+    for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default",
+      "my friend Hoa sent me a photo of my notice of default"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
-    for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+    for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default",
+      // ASR's own output for a spoken "hoa" opening the sentence (measured, AssemblyAI streaming).
+      "Hoa sent me the Notice of Default.", "I got a notice of default. Hoa is foreclosing on my condo."]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
     // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
     const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
     assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
