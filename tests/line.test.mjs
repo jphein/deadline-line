@@ -640,6 +640,14 @@ test("dialog: 'no' twice to the date question offers to stop, or goes on to a le
     assert.equal(taken.done, false); assert.equal(taken.letter, "ca-3day"); assert.match(taken.say, /^Got it: California: a 3-day notice to pay rent or move out\. What date is on it\?/);
     assert.equal((await atStop("yeah, there's a summons too")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
     for (const reply of ["yes", "bye"]) assert.equal((await atStop(reply)).done, true, reply);
+    // The review's phrasings, at the 30-day notice's stop offer: the letter named is taken up, whatever word leads.
+    const ud = await atStop("yes, but I also got an eviction summons");
+    assert.equal(ud.letter, "ca-ud"); assert.match(ud.say, /^Got it: California: court papers for an eviction .*What date is on it\?/);
+    const jury = await atStop("bye, actually I have a jury summons");
+    assert.equal(jury.done, false); assert.equal(jury.letter, "jury-summons"); assert.match(jury.say, /^A jury summons prints its own date/);
+    // A notice of default has no date to ask for: it's answered.
+    const nod = await atStop("no, I got a notice of default");
+    assert.equal(nod.letter, "ca-foreclosure-nod"); assert.match(nod.say, /^A Notice of Default starts the foreclosure clock/);
     assert.match((await atStop("no")).say, /^Okay\. What day was the notice handed to you\?/);
     // One "no", then the date: no stop offer.
     const once = await run(["I got a 3 day notice", "no", "September 28"]);

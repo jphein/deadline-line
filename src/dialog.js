@@ -167,7 +167,7 @@ export class Dialog {
       else if (YES.test(t) && !LETTERISH.test(t)) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
     }
     const answered = this.awaiting === "more" || this.awaiting === "text";
-    if (BYE.test(t) && !/\bletter|notice|papers\b/i.test(t)) return this.goodbye();
+    if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
 
     // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
     // ("the due date was August 1st" looks back for a shutoff notice).
