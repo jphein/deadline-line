@@ -12,6 +12,8 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 // "what did you say", "sorry, what?", or a bare "again", "huh" or "what". "They denied me again" isn't one.
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
+// A goodbye said outright, not just thanks: "okay bye" is a goodbye, "no thanks" at an offer is still a no.
+const FAREWELL = /\b(bye|goodbye|hang up)\b/i;
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
 // "H.O.A." in any case; the bare "HOA" in capitals or lowercase, never "Hoa" (a given name); ASR's spaced
@@ -128,13 +130,17 @@ export class Dialog {
     // "Do you want to stop here?": a letter named in the reply ("yes, I also got a 3 day notice") is taken up, not a goodbye.
     // (A forged "stop" stage plus "yes" says goodbye without the offer having been made: self-only, like any stage the page
     // sends back; the state isn't authenticated.)
+    // A no to stopping, with thanks or not ("no thanks", "no, that's all"), asks the date again: the caller can still say
+    // bye, while a call ended on a misread "no" loses the deadline. A goodbye said outright ("no thank you, goodbye") ends it.
     if (this.awaiting === "stop" && !named) {
+      if (NO.test(t) && !FAREWELL.test(t)) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
       if (YES.test(t) || BYE.test(t)) return this.goodbye();
-      if (NO.test(t)) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
     }
+    // "Okay bye" after an answer is a goodbye, not a yes to the explanation or the text.
+    const yes = YES.test(t) && !FAREWELL.test(t);
 
     if (this.awaiting === "more" && !named) {
-      if (HOW.test(t) || YES.test(t)) {
+      if (HOW.test(t) || yes) {
         this.awaiting = "text";
         return this.say(`Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`);
       }
@@ -144,8 +150,8 @@ export class Dialog {
     if (this.awaiting === "text" && !named) {
       const texted = "Okay. In the real service I'd text the date and a calendar reminder to this number. ";
       // A letter the caller also named comes next, rather than the goodbye.
-      if (this.carry.length && (YES.test(t) || NO.test(t))) return this.startCarry(YES.test(t) ? texted : "Okay. ");
-      if (YES.test(t)) { this.awaiting = null; return this.say(texted + this.closing(), true); }
+      if (this.carry.length && (yes || NO.test(t))) return this.startCarry(yes ? texted : "Okay. ");
+      if (yes) { this.awaiting = null; return this.say(texted + this.closing(), true); }
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
     // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
@@ -159,8 +165,10 @@ export class Dialog {
     }
     let switched = null;
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
-      if (BYE.test(t) && !named) return this.goodbye();
       const carry = this.carry;
+      // With a letter carried, a no with thanks ("no thanks", "no thank you, that's all") is a no, answered below like "no":
+      // to "Want me to go on to it?" its goodbye names the letter (and, for a trustee's sale, the reinstatement cutoff).
+      if (BYE.test(t) && !named && !(NO.test(t) && !CARRIED_ASKS.has(carry[0]))) return this.goodbye();
       // A carried question first (not reached in real flows: answer() opens it itself; kept for a state the page sends).
       if (CARRIED_ASKS.has(carry[0])) return this.startCarry("");
       // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
