@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ e0d4a46c5030f1cc0a2078ccaaac3abed7871e38), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 613f9deca033fa1cdd2d8db750c8130ba7f05981), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -1150,7 +1150,7 @@ export const AMBIGUOUS = [
     // court or program.)
     spoken: /^(?=.*\b(social security|SSA|SSI|SSDI)\b|(?!.*\b(accommodation|at work|my job|employer)\b)(.*\bdisability\b.*\b(judge|ALJ)\b|.*\b(judge|ALJ)\b.*\bdisability\b))(?=.*\bhearings?\b)(?=.*\b(denied|deny|denial|turned (me )?down|said no|rejected|lost|against me|unfavorable|not disabled|again|twice|second time|reconsider\w*|appeal\w*|judge|ALJ)\b)/is,
     unless: (t) => RULES.find(r => r.id === "ssa-recon").not.test(t) || /notice of reconsideration|notice of disapproved claim|\b(initial|first) (determination|denial|decision)\b|(ask|request)( for)? (a )?reconsideration/i.test(t),
-    candidates: ["ssa-recon", "ssa-appeals-council"],
+    candidates: ["ssa-recon", "ssa-appeals-council"], label: "a Social Security hearing letter",
     question: "Have you already had your Social Security hearing with a judge?",
     // Tried in order, before each rule's own `answers`: a "not yet" first, so "no, I haven't had it" isn't read as "had it".
     // "Not yet" yields to an outcome or a hearing already had ("no, the judge ruled against me"; "I had it but I haven't
@@ -1159,7 +1159,7 @@ export const AMBIGUOUS = [
               ["ssa-appeals-council", /^\W*(yes|yeah|yep|i did)\b|\b(already|had it|had (my|the) hearing|went to (it|the hearing|my hearing)|the judge|lost|ruled|it was|heard back|went|the decision)\b/i]] },
   // "The debt collector says you may have been served already with a lawsuit.": a lawsuit, or still just the letter?
   // So does a bare "lawsuit" from a collector ("the lawsuit from the collection agency"): papers, or still the letter?
-  { spoken: /\b(may|might|could) have (been )?(served|sued)\b|\blawsuit (from|by) (the |a |my )?(debt collector|collection agency|collections?|collector)\b|\b(collector|agency|collections)'s lawsuit\b/i, candidates: ["ca-civil-summons", "debt-validation"],
+  { label: "papers or a letter from a debt collector", spoken: /\b(may|might|could) have (been )?(served|sued)\b|\blawsuit (from|by) (the |a |my )?(debt collector|collection agency|collections?|collector)\b|\b(collector|agency|collections)'s lawsuit\b/i, candidates: ["ca-civil-summons", "debt-validation"],
     question: "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?",
     // Its own answers, in order: court papers first ("I got a summons"), then the letter ("just the letter").
     // A court word that's denied ("I didn't get a summons", "no summons") or only in the letter ("the letter mentions a
@@ -1170,17 +1170,17 @@ export const AMBIGUOUS = [
       [null, /^(?!.*\b(no|not|haven'?t|hasn'?t|didn'?t|never|won'?t)\b).*\bletter (says|said)\b.*\b(sued|lawsuit)\b/i],
       ["ca-civil-summons", /^(?!.*\b(no|not|didn'?t|haven'?t|hasn'?t|never|without)\b[^,.;!?]{0,15}?\b(court papers|papers|summons|lawsuit|sued|served)\b)(?!.*\bletter (says|said|mentions|talks about)\b).*\b(court papers|papers|summons|lawsuit|sued|court|both)\b/i],
       ["debt-validation", /^(?!\W*(no|nope|nah)\W*$).*\b(letter|notice|collector|just|only|not yet|no|not|didn'?t|haven'?t|never)\b/i]] },
-  { spoken: /\bsummons\b|\bcourt papers\b/i, candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
+  { label: "a summons or court papers", spoken: /\bsummons\b|\bcourt papers\b/i, candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
     question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
   // Papers served together with a notice to quit or a 3-day notice may be an eviction (10 court days) or a money
   // lawsuit (30 days): asked, even over the rules' pick, so a UD isn't answered with the later deadline.
-  { preempt: true,
+  { preempt: true, label: "court papers with a notice to quit",
     spoken: /\bserved (me |you )?(with )?(court |legal |the )?papers\b.*\b(3[- ]day notice|notice to (quit|vacate|pay rent))\b|\b(3[- ]day notice|notice to (quit|vacate|pay rent))\b.*\bserved (me |you )?(with )?(court |legal |the )?papers\b/i,
     candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
     question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
-  { spoken: /notice to (vacate|move out|terminate)|terminat\w* (of )?(my |the )?tenancy|move[- ]out notice|telling me to move out/i, candidates: ["ca-30day-notice", "ca-60day-notice"],
+  { spoken: /notice to (vacate|move out|terminate)|terminat\w* (of )?(my |the )?tenancy|move[- ]out notice|telling me to move out/i, candidates: ["ca-30day-notice", "ca-60day-notice"], label: "a notice to move out",
     question: "Does the notice give you 30 days or 60 days?" },
-  { spoken: /\b(irs|internal revenue)\b/i, candidates: ["irs-cp2000", "irs-deficiency", "irs-levy"],
+  { spoken: /\b(irs|internal revenue)\b/i, candidates: ["irs-cp2000", "irs-deficiency", "irs-levy"], label: "a letter from the IRS",
     question: "Is it a CP2000 about proposed changes to your return, a Notice of Deficiency, or a final notice before a levy?" },
 ];
 
@@ -1215,6 +1215,59 @@ export function unhedged(text) {
     : /^\s*if\b/i.test(sentence) ? sentence.replace(IF_SUIT, " ").replace(SUIT_WILL, " ") : sentence.replace(HEDGE_SUIT, " "));
 }
 export const textFor = (r, text) => r.unhedge ? unhedged(text) : text;
+
+// A short spoken name for each letter, for "You also mentioned …" and "Now, about …": no "California:", no
+// parentheses, not in the caller's first person.
+const CARRY_TITLE = {
+  "ssa-recon": "a second Social Security denial", "ssa-initial": "a Social Security denial", "ca-3day": "a 3-day notice",
+  "ca-ud": "eviction court papers", "ca-noa": "a Notice of Action about Medi-Cal, CalFresh or CalWORKs",
+  "ca-civil-summons": "court papers for a lawsuit", "jury-summons": "a jury summons", "ca-traffic-ticket": "a traffic ticket",
+  "ca-dmv-aps": "a DMV license suspension", "ca-parking-ticket": "a parking ticket", "ca-parking-delinquent": "a late notice for a parking ticket",
+  "ca-parking-review": "a parking ticket review result", "ssa-overpayment": "a Social Security overpayment notice",
+  "ssa-appeals-council": "a judge's decision on a Social Security claim", "ssa-benefits-ending": "a notice that Social Security benefits will stop or go down",
+  "ca-edd-determination": "an EDD unemployment notice", "ca-edd-sdi": "an EDD disability or paid family leave denial",
+  "ca-medi-cal-plan": "a Medi-Cal health plan appeal decision", "ca-medi-cal-plan-denial": "a Medi-Cal health plan denial",
+  "ca-30day-notice": "a 30-day notice to move out", "ca-60day-notice": "a 60-day notice to move out", "ca-rent-increase": "a rent increase notice",
+  "ca-sheriff-vacate": "a sheriff's notice to vacate", "ca-subsidy-end": "a notice ending a rent subsidy",
+  "ca-utility-shutoff": "a gas or electric shutoff notice", "ca-water-shutoff": "a water shutoff notice", "debt-validation": "a debt collector's letter",
+  "ca-repo-notice": "a notice about a repossessed car", "hud-voucher-termination": "a notice ending a Section 8 voucher",
+  "hud-public-housing": "a public housing lease termination notice", "ca-foreclosure-nod": "a Notice of Default",
+  "ca-foreclosure-sale": "a Notice of Trustee's Sale", "ca-small-claims": "small claims court papers", "irs-deficiency": "an IRS Notice of Deficiency",
+  "irs-levy": "an IRS notice of intent to levy", "irs-cp2000": "an IRS CP2000 notice", "ca-ftb-npa": "a Franchise Tax Board notice",
+};
+for (const r of RULES) r.carryTitle = CARRY_TITLE[r.id];
+
+// How soon a letter's deadline usually comes, in calendar days from the letter: when a caller names two letters at
+// once, the sooner one is answered first and the other is carried. A ranking, not a deadline: court days are counted
+// as about 1.4 calendar days, the mailing days are added, and a letter that prints its own date (a jury summons, a
+// sale date) or has no deadline to count comes last. For the rules whose count isn't a plain spec:
+// - The sheriff's notice ranks before the 3-day notice: it's after the judgment, and the lockout itself is days away.
+// - A Notice of Action ranks by its effective date (benefits continue only if the hearing is asked for before it,
+//   about 10 days), not the 90-day hearing deadline.
+// - A letter without a counted deadline gets a conservative minimum rather than "last", so an imminent one isn't
+//   answered after a slow one: a voucher termination (a hearing request window of about 10 days), a trustee's sale
+//   (at least 20 days' notice), small claims (a hearing about a month out, papers served at least 15 days before),
+//   a jury summons or a traffic ticket (an appearance date, often about two weeks), a debt collector's validation
+//   letter (30 days to dispute), a notice of default (three months to cure).
+const COUNTED_ELSEWHERE = { "ca-sheriff-vacate": 3 /* lockout */, "ca-3day": 4 /* 3 court days */, "ca-ud": 14 /* 10 court days */,
+  "ssa-recon": 65, "ssa-initial": 65 /* 60 + 5 mailing */, "ca-noa": 10 /* the effective date */,
+  "hud-voucher-termination": 10, "ca-foreclosure-sale": 20, "ca-small-claims": 15, "jury-summons": 14, "ca-traffic-ticket": 14,
+  "debt-validation": 30, "ca-foreclosure-nod": 90 };
+// The order letters named together are answered in: a later stage of the same matter first, because it replaces the
+// earlier one's deadline (an eviction lawsuit served after a 3-day notice: the 10-court-day response is what counts,
+// CCP § 1167), then the sooner deadline, then on a tie the lawsuit papers, then the order the caller named them in.
+const SUPERSEDES = { "ca-ud": ["ca-3day", "ca-30day-notice", "ca-60day-notice"], "ca-sheriff-vacate": ["ca-ud"],
+  "irs-deficiency": ["irs-cp2000"], "ca-foreclosure-sale": ["ca-foreclosure-nod"] };
+const LAWSUIT = new Set(["ca-ud", "ca-civil-summons", "ca-small-claims"]);
+export function answerOrder(ids) {
+  const replaced = (id) => ids.some(o => SUPERSEDES[o]?.includes(id));
+  return [...ids].sort((a, b) => (replaced(a) - replaced(b)) || (urgency(a) - urgency(b)) || (LAWSUIT.has(b) - LAWSUIT.has(a)));
+}
+export function urgency(id) {
+  if (id in COUNTED_ELSEWHERE) return COUNTED_ELSEWHERE[id];
+  const r = RULES.find(x => x.id === id);
+  return r?.count ? r.count.days + (r.count.mail ?? 0) : Infinity;
+}
 
 export function detect(text) {
   if (!text || text.trim().length < 20) return null;

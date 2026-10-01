@@ -586,16 +586,16 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     const summons = await run(["the collection agency is suing me, I also got a 3 day notice", "September 28", "the summons", "a lawsuit about money", "September 25"]);
     assert.equal(summons[2].say, "Is it about an eviction, a lawsuit about money, or jury duty?"); assert.equal(summons[2].letter, null);
     assert.equal(summons[3].letter, "ca-civil-summons"); assert.match(summons[4].say, /^Your deadline is Monday, October 26, 2026\./);
-    // The engine answers the summons first here; the 3-day notice is carried, and the caller describes it.
-    const other = await run(["I got a 3 day notice and also a summons from a debt collector", "September 25", "no", "it's a three day notice to pay rent, dated September 28"]);
-    assert.equal(other[1].letter, "ca-civil-summons"); assert.match(other[1].say, /You also mentioned a 3-day notice to pay rent or move out; tell me about that next\./);
-    assert.match(other[2].say, /^Okay\. Now, about a 3-day notice to pay rent or move out\./);
-    assert.equal(other[3].letter, "ca-3day"); assert.match(other[3].say, /^Your deadline is Thursday, October 1, 2026\./);
+    // The sooner deadline first (the 3-day notice), the summons carried; the caller then describes it.
+    const other = await run(["I got a 3 day notice and also a summons from a debt collector", "September 28", "no", "it's the summons from the debt collector, I got it September 25"]);
+    assert.equal(other[1].letter, "ca-3day"); assert.match(other[1].say, /You also mentioned court papers for a lawsuit \(a Summons that isn't about an eviction\); tell me about that next\./);
+    assert.match(other[2].say, /^Okay\. Now, about court papers for a lawsuit/);
+    assert.equal(other[3].letter, "ca-civil-summons"); assert.match(other[3].say, /^Your deadline is Monday, October 26, 2026\./);
     // A first answer with nothing to count asks the carried letter's date at once; a goodbye still ends the call.
-    const nod1 = await run(["I got a notice of default on my house, I also got a 3 day notice", "September 28"]);
-    assert.match(nod1[0].say, /You also mentioned a 3-day notice to pay rent or move out; tell me about that next\. What date is on it\?$/);
-    assert.equal(nod1[1].letter, "ca-3day"); assert.match(nod1[1].say, /^Your deadline is Thursday, October 1, 2026\./);
-    const bye = await run(["I got a notice of default on my house, I also got a 3 day notice", "goodbye"]);
+    const jury = await run(["I got a jury summons, I also got a 60 day notice to move out", "September 1"]);
+    assert.match(jury[0].say, /You also mentioned a 60-day notice to move out \(termination of tenancy\); tell me about that next\. What date is on it\?$/);
+    assert.equal(jury[1].letter, "ca-60day-notice");
+    const bye = await run(["I got a jury summons, I also got a 60 day notice to move out", "goodbye"]);
     assert.equal(bye[1].done, true);
     // A carried letter with no date to ask for is answered when it's reached.
     const nod = await run(["social security denied my disability, I also got a notice of default", "September 20", "yes", "no"]);

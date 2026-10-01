@@ -1,10 +1,10 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ e0d4a46c5030f1cc0a2078ccaaac3abed7871e38), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 613f9deca033fa1cdd2d8db750c8130ba7f05981), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
 // (which began as Deadline Decoder's and have grown since). No I/O here, so every answer is testable.
 import { d, iso, addDays, daysBetween, fmt, findDates } from "./rules/dates.js";
-import { RULES, SPOKEN_ORDER, AMBIGUOUS, detect, textFor } from "./rules/rules.js";
+import { RULES, SPOKEN_ORDER, AMBIGUOUS, detect, textFor, answerOrder } from "./rules/rules.js";
 
 export { KEYTERMS } from "./rules/rules.js";
 
@@ -32,7 +32,7 @@ function findRule(id) {
 
 export function listLetterTypes() {
   return RULES.map(r => ({ id: r.id, title: r.title, description: r.plain, date_to_ask_for: r.dateLabel ?? null,
-    family: r.family, confidence: r.confidence, needs_date: r.anchor !== null }));
+    family: r.family, confidence: r.confidence, needs_date: r.anchor !== null, carry_title: r.carryTitle }));
 }
 
 // The rules write their working for the eye ("2026-09-25 skipped — Native American Day.").
@@ -174,7 +174,13 @@ export const UNKNOWN_LETTER = `I couldn't tell which kind of letter that is. Is 
 /** Which kind of letter is this? `among`: the candidate ids from a "which one?" question, to match the answer to.
  *  `letterType`: the kind already identified, when this text answers "what's the date?", so the date is read the way
  *  that letter's date is ("the due date was August 1st" looks back for a bill counted from its due date). */
-export function detectLetter(text, today = todayIso(), among = [], { letterType } = {}) {
+export function detectLetter(text, today = todayIso(), among = [], opts = {}) {
+  const { ask_label, ...whole } = detectOne(text, today, among, opts);
+  const also = carried(whole, text, today, among, opts);   // may answer a sooner letter in the turn instead
+  return { ...whole, ...also };
+}
+
+function detectOne(text, today, among, { letterType } = {}) {
   if (typeof text !== "string") throw new DecoderError("text must be a string");
   // A question with its own answers (the hearing ask) is matched by those first, in order.
   const asked = among.length ? AMBIGUOUS.find(g => g.answers && g.candidates.length === among.length && g.candidates.every(c => among.includes(c))) : null;
@@ -215,21 +221,42 @@ export function detectLetter(text, today = todayIso(), among = [], { letterType 
     dates_found: all.map(x => x.iso),
     suggested_notice_date: dates[0] ?? null,
     speech: rule ? `That sounds like: ${rule.title}.${ask ? ` ${ask}` : ""}` : group ? group.question : UNKNOWN_LETTER,
-    ...alsoDetected(text, today, rule && !among.length ? rule.id : null),
+    ask_label: group?.label ?? null,
   };
 }
 
 // A second letter, only when the caller cues one ("…, I also got a 3 day notice", "…, plus my landlord gave me…"): the
-// turn is split at the cue and each part detected on its own; a part that names a different letter than the turn's
-// answer is carried, for the caller to hear about next. Without a cue nothing is carried: a turn that matches two
+// turn is split at the cue and each part detected on its own. Without a cue nothing is carried: a turn that matches two
 // rules is usually one letter said two ways (measured: 35 of 186 recognized harness sentences match a second rule;
 // with the cue, none do).
+// - A later stage of the same matter, else the sooner deadline, is answered first (answerOrder, in the rules), from its own part, so a date said with one letter
+//   isn't offered as the other's; the rest are carried in also_detected.
+// - A part that's a question of its own ("…, I also got a summons": eviction, lawsuit or jury?) is carried in also_asks,
+//   under its group's label, unless it could be a letter already answered or carried.
+// - Not resolved: "…and I also got one from the FTB" ("one" = the first part's letter). Even read as "a letter from
+//   the FTB", no rule hears a bare FTB letter, so it would carry nothing either way.
 const ALSO_CUE = /(?:[,.;]\s*|\s+and\s+)(?=(?:I\s+)?(?:also|plus)\b|(?:I\s+)?(?:got|have) another\b|I\s+(?:also\s+)?got\b)|\s+(?=also got\b)/i;
-function alsoDetected(text, today, chosen) {
-  const parts = chosen ? text.split(ALSO_CUE).filter(p => p.trim().length > 3) : [];
-  const ids = parts.length < 2 ? [] : [...new Set(parts.map(p => detectLetter(p, today).letter_type).filter(id => id && id !== chosen))];
-  const titles = ids.map(id => findRule(id).title.replace(/^California: /, ""));
-  return { also_detected: ids, also_detected_spoken: titles.length ? `You also mentioned ${titles.join(" and ")}; tell me about that next.` : null };
+function carried(whole, text, today, among, opts) {
+  const none = { also_detected: [], also_asks: [], also_detected_spoken: null };
+  const parts = among.length || !(whole.recognized || whole.candidates.length) ? [] : text.split(ALSO_CUE).filter(p => p.trim().length > 3);
+  if (parts.length < 2) return none;
+  const found = parts.map(p => detectOne(p, today, [], opts));
+  // The parts decide. A whole-turn pick that no part names is two letters' words run together, and is dropped
+  // ("social security denied me again and my hearing is scheduled, I also got a 3 day notice": the first part is the
+  // hearing question, not a second Social Security letter). A letter the open question already offers isn't carried.
+  let ids = [...new Set(found.map(r => r.letter_type).filter(Boolean))];
+  if (!whole.recognized) ids = ids.filter(id => !whole.candidates.includes(id));
+  const [first, ...rest] = !whole.recognized ? [null, ...ids] : ids.length ? answerOrder(ids) : [whole.letter_type];
+  const asked = new Set([first, ...rest]);
+  const labels = new Set([whole.recognized ? null : found.find(r => r.candidates.join() === whole.candidates.join())?.ask_label]);
+  const asks = found.filter(r => !r.recognized && r.ask_label && !r.candidates.some(c => asked.has(c)) && !labels.has(r.ask_label) && labels.add(r.ask_label))
+    .map(r => ({ label: r.ask_label, question: r.speech, candidates: r.candidates }));
+  // With two letters (or a letter and a question), the answer is the chosen letter's own part, so its dates are its own,
+  // not the other letter's. With one letter, the whole turn is about it ("I got a 3 day notice, I got it yesterday").
+  const own = first && (rest.length || asks.length) && found.find(r => r.letter_type === first);
+  if (own) { const { ask_label, ...main } = own; Object.assign(whole, main); }
+  const names = [...rest.map(id => findRule(id).carryTitle), ...asks.map(a => a.label)];
+  return { also_detected: rest, also_asks: asks, also_detected_spoken: names.length ? `You also mentioned ${names.join(" and ")}; tell me about that next.` : null };
 }
 
 function icsDate(dt) { return iso(dt).replaceAll("-", ""); }
