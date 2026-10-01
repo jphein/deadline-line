@@ -633,6 +633,14 @@ test("dialog: 'no' twice to the date question offers to stop, or goes on to a le
     assert.match(keep[3].say, /^Okay\. What date is on it\?/); assert.equal(keep[4].letter, "ca-3day"); assert.match(keep[4].say, /^Your deadline is/);
     const onward = await run(["the collection agency is suing me, I also got a 3 day notice", "no", "no"]);
     assert.match(onward[2].say, /^Okay\. Now, about court papers for a lawsuit/); assert.equal(onward[2].letter, "ca-civil-summons");
+    // At "Do you want to stop here?": a letter named in the reply is taken up, not a goodbye; a bare "yes" or "bye" ends
+    // the call; a bare "no" (don't stop) asks for the date again, in the letter's own words.
+    const atStop = async (reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of ["I got a 30 day notice", "no", "no"]) await d.handle(t); return { ...(await d.handle(reply)), letter: d.letter }; };
+    const taken = await atStop("yes, I also got a 3 day notice");
+    assert.equal(taken.done, false); assert.equal(taken.letter, "ca-3day"); assert.match(taken.say, /^Got it: California: a 3-day notice to pay rent or move out\. What date is on it\?/);
+    assert.equal((await atStop("yeah, there's a summons too")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
+    for (const reply of ["yes", "bye"]) assert.equal((await atStop(reply)).done, true, reply);
+    assert.match((await atStop("no")).say, /^Okay\. What day was the notice handed to you\?/);
     // One "no", then the date: no stop offer.
     const once = await run(["I got a 3 day notice", "no", "September 28"]);
     assert.match(once[2].say, /^Your deadline is/);

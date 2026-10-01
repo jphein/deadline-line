@@ -117,7 +117,10 @@ export class Dialog {
       if (saidNo) { this.awaiting = "stop"; return this.say("Do you want to stop here?"); }
       this.dateNo = true;
     }
-    if (this.awaiting === "stop") {
+    // "Do you want to stop here?": a letter named in the reply ("yes, I also got a 3 day notice") is taken up, not a goodbye.
+    // (A forged "stop" stage plus "yes" says goodbye without the offer having been made: self-only, like any stage the page
+    // sends back; the state isn't authenticated.)
+    if (this.awaiting === "stop" && !LETTERISH.test(t)) {
       if (YES.test(t) || BYE.test(t)) return this.goodbye();
       if (NO.test(t)) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
     }
