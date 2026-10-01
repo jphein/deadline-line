@@ -14,12 +14,24 @@ const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
 // A no that ends in a yes ("no, okay go ahead", "no wait, yes"): the caller corrected themselves, and the yes wins.
 const NO_THEN_YES = /\b(no|nope|nah)\b.*\b(go ahead|go on|yes|yeah|yep|sure)\W*$/i;
+// …but not a yes that is itself negated ("no, I'm not saying yes", "no, not yes", "no, don't go ahead").
+const NEGATED_YES = /\b(not|never|\w+n't)\s+(\w+\s+){0,2}(go ahead|go on|yes|yeah|yep|sure)\W*$/i;
+// A date said and denied in the same breath ("September 3 isn't the date", "that's not it"): no date was given.
+const MONTH = "jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?";
+const RELATIVE_DAY = "today|tonight|yesterday|tomorrow|this (morning|afternoon|evening)|last night";
+const NOT_DATE = new RegExp(`\\b(isn'?t|is not|wasn'?t|was not|that'?s not|not)\\s+(the |my |its )?(date|it|right(?!\\s+now))\\b|\\bnot\\s+(on\\s+)?(the\\s+)?(\\d|(${MONTH})\\b|(${RELATIVE_DAY})\\b)`, "i");
+// A relative day said with a no or a "not" ("no thanks, yesterday was bad enough") is never taken as the date: only an
+// explicit one ("no, it was September 3").
+const RELATIVE = new RegExp(`\\b(${RELATIVE_DAY})\\b`, "i"), EXPLICIT = new RegExp(`\\b(${MONTH})\\b|\\d`, "i");
+const NEGATION = /\b(no|nope|nah|not)\b|n't\b/i;
+const deniesDate = (t) => NOT_DATE.test(t) || (NEGATION.test(t) && RELATIVE.test(t) && !EXPLICIT.test(t));
 // A goodbye said outright, not just thanks: "okay bye" is a goodbye, "no thanks" at an offer is still a no.
 const FAREWELL = /\b(bye|goodbye|hang up)\b/i;
 // The caller asking the line to stay ("please don't hang up", "no need to say goodbye", "don't go", "hold on", "stay on the
-// line", "wait, please"): it's taken out of the reply before the yes, no and goodbye words are looked for. "Never mind
+// line", "wait, please", "wait a second"; "wait" only as an instruction, never "I can't wait" or "I'll wait for the
+// mail"): it's taken out of the reply before the yes, no and goodbye words are looked for. "Never mind
 // hang up" is a goodbye.
-const STAY = /\b(please,?\s+)?((don'?t|do not|never(?!\s+mind)|no need to)\s+((want|need) (you )?to\s+|\w+\s+)?(hang up|say (good)?bye)\b|(don'?t|do not) (go|leave)\b|(stay on|hold) the line\b|hold on\b|wait\b)(,?\s+please\b)?/i;
+const STAY = /\b((i|we)\s+)?(please,?\s+)?((don'?t|do not|never(?!\s+mind)|no need to)\s+((want|need) (you )?to\s+|\w+\s+)?(hang up|say (good)?bye)\b|(don'?t|do not) (go(?!\s+(ahead|on)\b)|leave)\b|(stay on|hold) the line\b|hold on\b(?!\s+to\b)|(?<!(\bcan'?t|\bcannot|\bcouldn'?t|\bwon'?t|\bwill|'ll|\bto|\bnot|\bi|\bwe)\s+)wait\b(?!\s+(for|on|till|until)\b)(\s+a\s+(second|sec|minute|moment|bit)\b)?)(,?\s+please\b)?/i;
 const STAY_ALL = new RegExp(STAY.source, "gi");
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
@@ -152,12 +164,14 @@ export class Dialog {
     const yes = YES.test(u) && !farewell;
     // At the offers (go on to it, explain, text) a no wins over a yes-word said with it ("okay, no thanks"), unless the
     // reply ends in a yes ("no, okay go ahead").
-    const no = NO.test(u) && !NO_THEN_YES.test(u);
+    const no = NO.test(u) && !(NO_THEN_YES.test(u) && !NEGATED_YES.test(u));
     this.saidNo = no;   // a stay said with a no ("no, don't hang up"): the question is answered, not asked again
     // A no to stopping, with thanks or not ("no thanks", "no, that's all"), or a "don't hang up" asks the date again: the
     // caller can still say bye, while a call ended on a misread "no" loses the deadline. A goodbye said outright ("no thank
     // you, goodbye") ends it.
-    if (this.awaiting === "stop" && !named) {
+    // A date said at the stop offer ("actually it's September 3, thanks") is read, before any yes, no or goodbye.
+    const stopDate = this.awaiting === "stop" && !named && this.letter && !deniesDate(t) && await this.saysDate(t);
+    if (this.awaiting === "stop" && !named && !stopDate) {
       if ((NO.test(u) && !farewell) || stay) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
       if (YES.test(u) || bye) return this.goodbye();
     }
@@ -216,7 +230,9 @@ export class Dialog {
         if (no) return this.leave("Okay. ", true);
         if (YES.test(u)) return this.startCarry("");
       }
-      const declinedDated = dated && (no || (bye && !yes)) ? (no ? "no" : "bye") : false;
+      // A no without thanks or a goodbye ("no", "nope", "no, not the 3rd") isn't a decline: as at the date question, the
+      // letter is taken up and its date asked, and a second no offers to stop.
+      const declinedDated = dated && bye && !yes;
       if (!carry.length && NO.test(u) && !named) return this.goodbye();
       this.reset();
       // The letter the caller also named: this turn is about it (its date, or just "okay"). A different letter named here
@@ -226,12 +242,15 @@ export class Dialog {
       else if (YES.test(u) && !named) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
     }
     const answered = this.awaiting === "more" || this.awaiting === "text";
-    if (bye && !named && !switched) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
 
     // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
     // ("the due date was August 1st" looks back for a shutoff notice).
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
+    // A goodbye comes after the date is looked for: "September 3, thanks, please don't hang up" is a date. A date denied
+    // ("no thanks, September 3 isn't the date") isn't one, and the date is asked again.
+    const denied = deniesDate(t), dateSaid = Boolean(det.suggested_notice_date) && !denied;
+    if (bye && !named && !switched && !dateSaid && !(this.letter && denied)) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
     // A bare yes or no to a which-kind question the decoder can't settle ("Is it about an eviction, a lawsuit about money,
     // or jury duty?" → "yes"): that question again, not the generic "I couldn't tell".
     const open = AMBIGUOUS.find(g => this.candidates.length && g.candidates.length === this.candidates.length && g.candidates.every(c => this.candidates.includes(c)));
@@ -242,9 +261,12 @@ export class Dialog {
     // A second letter named in the same turn is carried, to be taken up after this one.
     const also = [...(det.also_detected ?? []), ...(det.also_asks ?? []).map(a => `ask:${a.label}`)].filter(c => !c.startsWith("ask:") || CARRIED_ASKS.has(c));
     if (also.length) this.carry = also;
+    // A new letter named instead of the carried one ("I also got a 3 day notice" at "Want me to go on to it?"): it comes
+    // first, and the carried one is kept for after it.
+    if (switched && (det.candidates?.length || (det.recognized && det.letter_type !== switched))) this.carry = [switched, ...this.carry.filter(c => c !== switched)];
     if (this.carry.length && det.recognized) this.carry = this.carry.filter(id => id !== det.letter_type);
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
-    if (det.suggested_notice_date) this.date = det.suggested_notice_date;
+    if (dateSaid) this.date = det.suggested_notice_date;
 
     if (HOA.test(t)) this.hoa = true;   // "my HOA sent me a letter" → "what kind?" → "a notice of default"
     // A different sender named ("…actually it's from my mortgage lender") clears an earlier HOA mention; a corrected
@@ -252,9 +274,9 @@ export class Dialog {
     else if (LENDER.test(t)) this.hoa = false;
     if (switched && !det.recognized) {
       const info = await this.letterInfo(switched);
-      if (!this.date && this.declinedDated) { this.carry = [switched, ...this.carry]; this.letter = null; return this.leave("Okay. ", this.declinedDated === "no"); }
+      if (!this.date && this.declinedDated) { this.carry = [switched, ...this.carry]; this.letter = null; return this.leave(); }
       if (!this.date && info.needs_date === false) return this.answer(t);
-      if (!this.date) { this.awaiting = "date"; return this.say(`Okay, about ${info.short}. ${ASK_DATE}`); }
+      if (!this.date) { this.awaiting = "date"; if (NO.test(u)) this.dateNo = true; return this.say(`Okay, about ${info.short}. ${ASK_DATE}`); }
     }
     if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
@@ -317,6 +339,11 @@ export class Dialog {
     return this.say(`${prefix}Now, about ${info.short}. ${ASK_DATE}`);
   }
 
+  /** Does this turn give a date for the current letter (as the decoder reads it)? A failed detection gives none. */
+  async saysDate(t) {
+    try { return Boolean((await this.call("detect_letter", this.args({ text: t, letter_type: this.letter })))?.suggested_notice_date); } catch { return false; }
+  }
+
   async letterInfo(id) {
     const all = (this.types ??= (await this.call("list_letter_types", {})).letter_types);
     const t = all.find(x => x.id === id) ?? { title: "other letter", needs_date: true };
@@ -349,7 +376,9 @@ export class Dialog {
       const names = [];
       for (const c of rest) names.push(theLetter(CARRIED_ASKS.get(c)?.label ?? (await this.letterInfo(c)).short));
       const how = rest.length > 1 ? "about them" : CARRIED_ASKS.has(rest[0]) || await undated(rest[0]) ? "about it" : "with its date";
-      line += `You also mentioned ${names.join(" and ")}: call back right away ${how}, or look for free legal help. `;
+      const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+      // Free legal help is said once: the "Don't put off" line already says it.
+      line += `You also mentioned ${list}: call back right away ${how}${line ? "." : ", or look for free legal help."} `;
     }
     // A trustee's sale carried behind another letter: its cutoff is still said.
     if (this.carry.slice(1).includes("ca-foreclosure-sale")) line += `For the Notice of Trustee's Sale: if you want to catch up on the loan, ${SALE_CUTOFF} `;
@@ -362,7 +391,11 @@ export class Dialog {
     if (!this.staying) { this.awaiting = null; return this.say(text + this.closing(), true); }
     // "Thanks, please don't hang up" (nothing done, no "no"): what was open stays open, and its question is asked again.
     // Something done on this turn (the text line, the explanation, a declined letter's goodbye) or a "no" closes it.
-    if (!acted && !this.saidNo && this.before) {
+    // At an open date question (the date stage, or a carried letter's date) a no said with the stay isn't a no to the
+    // letter: the question stays too.
+    const dateAsk = this.before && (this.before.awaiting === "date" || (this.before.awaiting === "another" && this.before.carry[0]
+      && !CARRIED_ASKS.has(this.before.carry[0]) && (await this.letterInfo(this.before.carry[0])).needs_date !== false));
+    if (!acted && (!this.saidNo || dateAsk) && this.before) {
       const { result, ...snap } = this.before;
       Object.assign(this, snap, { result, carry: [...snap.carry], candidates: [...snap.candidates] });
       const ask = await this.openQuestion();
