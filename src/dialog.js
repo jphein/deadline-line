@@ -42,7 +42,7 @@ const DIRECT_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok"
   "dated", "i", "got", "received", "they", "served", "handed", "delivered", "posted", "mailed", "gave", "me", "to", "landlord", "my",
   "notice", "letter", "papers", "this", "that", "that's", "a", "an", "from", "for", "of", "with", "and", "by", "sent", "we", "our",
   "us", "you", "your", "here", "says", "say", "on", "in", "at", "be", "been", "came", "come", "were", "them", "him", "her",
-  "also", "just", "to", "plus", "over", "off", "dropped"]);
+  "also", "just", "to", "plus", "over", "off", "dropped", "have", "has"]);
 // Letter-specific: "printed" / "mailing" only for a letter counted from its printed or mailing date (Social Security,
 // Medi-Cal, IRS, the Franchise Tax Board, EDD, a utility, parking); "due" only for the water bill, counted from its due
 // date. For a hand-over letter ("The date printed on the notice is September 3", "The notice is due September 3") they
@@ -50,8 +50,13 @@ const DIRECT_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok"
 const allowedWord = (letter) => {
   const rule = letter && RULES.find(r => r.id === letter);
   const printed = /printed|mailing/i.test(rule?.dateLabel ?? ""), due = rule?.anchor === "due";
-  return (w) => DIRECT_WORDS.has(w) || (printed && ["printed", "print", "mailing"].includes(w)) || (due && w === "due");
+  // A notice that commonly prints its move-out date ("you must move on or before…": the 30-day, 60-day and sheriff's
+  // notices): "my notice says September 3" may be that date, which counted as service errs late: the check. ("dated"
+  // stays plain for them.)
+  const late = SAYS_MOVE_OUT.has(letter);
+  return (w) => (DIRECT_WORDS.has(w) && !(late && (w === "says" || w === "say"))) || (printed && ["printed", "print", "mailing"].includes(w)) || (due && w === "due");
 };
+const SAYS_MOVE_OUT = new Set(["ca-30day-notice", "ca-60day-notice", "ca-sheriff-vacate"]);
 // A relative day counts directly only bare: "yesterday", "it was yesterday", "I got it yesterday"; "today" (tonight, this
 // morning ...) only with nothing but filler ("today", "it was today").
 // What a plain yes at the check may carry besides the yes ("yes, thanks", "yes, bye", "yes it was", "yes, September 3"),
@@ -61,14 +66,17 @@ const YES_REST = new Set(["yes", "yeah", "yep", "yup", "sure", "correct", "right
 // …or plain receipt phrasing with a receipt verb in it ("yes, that's when I got it", "yes, that's the day they gave it to
 // me"); never "due", "paid" or "printed" ("yes, that's when I paid"), and nothing without a receipt verb ("yes, the date
 // on it" says which date, not that the held one is right).
-const RECEIPT_VERB = /\b(?:got|received|handed|gave|served|delivered|posted|mailed|came|dropped)\b/i;
+const RECEIPT_VERB = /\b(?:got|received|handed|gave|served|delivered|posted|mailed|came|dropped|sent)\b/i;
 const yesRemainderOk = (words) => {
   const receipt = words.some(w => RECEIPT_VERB.test(w));
-  return words.every(w => YES_REST.has(w) || (receipt && (DIRECT_WORDS.has(w) || w === "when" || w === "day")));
+  return words.every(w => YES_REST.has(w) || (receipt && (DIRECT_WORDS.has(w) || w === "when" || w === "day" || w === "then")));
 };
 // The caller's own sending ("I sent the notice to my landlord on September 3") isn't the day it reached them: the check.
 // (Not a receipt said in the passive: "I was handed eviction papers", "we got it sent".)
-const SELF_SENT = /\b(?:i|we)\s+(?:(?!was\b|were\b|got\b|been\b|have\b|had\b|am\b|are\b)\w+\s+)?(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
+const SELF_SENT_FIRST = /\b(?:i|we)\s+(?:(?!was\b|were\b|got\b|been\b|have\b|had\b|am\b|are\b)\w+\s+)?(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
+// …nor said the other way round: "My landlord received notice from me on September 3", "the landlord got it from me".
+const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\s+(?:received|got|was given|was handed|was sent)\b/i;
+const SELF_SENT = { test: (t) => SELF_SENT_FIRST.test(t) || SENT_BY_CALLER.test(t) };
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
 const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
 /** The words of `t` other than the given spans and relative days (lowercase, punctuation dropped). */
@@ -257,7 +265,7 @@ export class Dialog {
       const said = dateCandidates(t);
       // A yes that says the held date again and nothing else ("yes, it was September 3") is a plain yes.
       const restated = said.length > 0 && said.every(c => !c.hard && !c.soft && sameDay(this.date, c))
-        && yesRemainderOk(otherWords(t, said));
+        && !SELF_SENT.test(t) && yesRemainderOk(otherWords(t, said));
       const newDay = (said.length > 0 && !restated) || RELATIVE.test(t);
       this.held = this.date;   // the date that was held, for a chatty restatement of it (asked once, then the date again)
       // A stay request and nothing else ("please don't hang up"): the check again, the date still held.
@@ -267,7 +275,8 @@ export class Dialog {
       if (YES.test(u0) && !NOT_A_YES.test(u0) && !newDay) {
         // A letter named with the yes: its words are the letter's; the rest must still be a plain yes.
         const ids = named ? await this.namedIds(t) : [];
-        if (yesRemainderOk(otherWords(t, said, ids.length ? ids : null, false, true))) { if (named) this.addCarry(ids); return this.answer(t); }
+        // (Never the caller's own sending: "Yes, I mailed it to my landlord" isn't a plain yes.)
+        if (!SELF_SENT.test(t) && yesRemainderOk(otherWords(t, said, ids.length ? ids : null, false, true))) { if (named) this.addCarry(ids); return this.answer(t); }
         // Not a plain yes, with a letter named ("Yes, that is the due date. I also got a 30 day notice."): the date is
         // asked again and the letter carried.
         if (named) { this.date = null; this.addCarry(ids); this.dateNo = true; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }

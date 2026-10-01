@@ -1431,6 +1431,41 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
     for (const reply of ["I sent the notice to my landlord on September 3", "I mailed it to the landlord September 3"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
     for (const reply of ["they sent it September 3", "it was sent to me September 3", "the landlord mailed it September 3", "I was handed it on September 3"])
       for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // X22: at the check, the caller's own sending isn't a plain yes (the named letter still carried); X23: "sent" by them
+    // is a receipt.
+    asked(await at(CHECKED, "Yes, I mailed it to my landlord"), "X22");
+    const mailed = await at(CHECKED, "Yes, I mailed it to my landlord. I also got a 30 day notice.");
+    assert.deepEqual([mailed.d.date, mailed.d.awaiting, mailed.d.carry], [null, "date", ["ca-30day-notice"]]); assert.doesNotMatch(mailed.say, /deadline/i);
+    asked(await at(CHECKED, "Yes, I sent it to my landlord"), "X23 own send");
+    for (const reply of ["Yes, that's when they sent it to me", "Yes, that's when they handed it to me"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    const sentAnd = await at(CHECKED, "Yes, that's when they sent it to me, I also have a 30 day notice");
+    assert.match(sentAnd.say, /^That deadline was Wednesday, September 9, 2026\./); assert.deepEqual(sentAnd.d.carry, ["ca-30day-notice"]);
+    // X21: a sending said the other way round ("received notice from me", "got it from me") goes to the check.
+    for (const reply of ["My landlord received notice from me on September 3", "the landlord got it from me September 3"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    // X24 (decided, after the legal read): "my notice says <date>" is direct for the 3-day notice (and printed-date
+    // letters); for the 30-day, 60-day and sheriff's notices, which commonly print the move-out date, it goes to the check;
+    // "dated <date>" stays direct for all of them. "I received it from my landlord on September 3" stays direct.
+    for (const setup of [DATE, STOP]) for (const reply of ["My notice says September 3", "the notice says September 3", "I received it from my landlord on September 3"])
+      assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    for (const reply of ["My notice says September 3", "it says September 3"]) HEARD(await at(SIXTY, reply), reply);
+    assert.match((await at(SIXTY, "dated September 3")).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/);
+    assert.match((await at(SIXTY, "I received it from my landlord on September 3")).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/);
+    const sheriff = new Dialog(mcp.callTool, { today: "2026-09-30" }); await sheriff.handle("I got a notice to vacate from the sheriff");
+    HEARD({ ...(await sheriff.handle("it says September 3")), d: sheriff }, "sheriff says");
+    assert.equal(sheriff.letter, "ca-sheriff-vacate");
+    // "Yes, they sent it to me then" is a plain receipt yes; "the landlord received it September 3" is the caller's sending.
+    assert.match((await at(CHECKED, "yes, they sent it to me then")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    for (const setup of [DATE, STOP]) HEARD(await at(setup, "the landlord received it September 3"), "landlord received");
+    // X18c / X22 at the six classes and end to end: the caller's own sending at the check is never a plain yes.
+    for (const setup of CLASSES) for (const reply of ["yes, that's when I mailed it", "Yes, I mailed it to my landlord", "Yes, I mailed it to my landlord. I also got a 30 day notice."]) {
+      const r = await at(setup, reply);
+      assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end|shut off your water/i, `${setup[0]} → ${reply}`);
+      if (/30 day/.test(reply) && setup[0] !== "I got a 30 day notice") assert.ok(r.d.carry.includes("ca-30day-notice"), `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle("yes, that's when I mailed it"); assert.doesNotMatch(r.say, /deadline/i, entry); assert.equal(d.date, null, entry);
+    }
     // Rule B / C: one row of every family, at the check too, is never counted from (the check or the date again).
     for (const reply of ["no, but I also got a summons", "September 3 is incorrect", "September 3, but that's wrong", "they left it on my door today", "I left it at home today",
       "September 3 was a mistake", "I'll pick it up on September 3", "I'm getting it September 3", "I hope to have it delivered today", "it should be delivered today",
