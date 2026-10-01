@@ -153,6 +153,8 @@ export class Dialog {
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
       if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();
       const carry = this.carry;
+      // A carried question first (not reached in real flows: answer() opens it itself; kept for a state the page sends).
+      if (CARRIED_ASKS.has(carry[0])) return this.startCarry("");
       // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
       if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !LETTERISH.test(t)) {
         if (YES.test(t)) return this.startCarry("");

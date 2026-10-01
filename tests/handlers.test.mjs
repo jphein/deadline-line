@@ -149,6 +149,15 @@ test("api/decode: a tampered stage without the date it needs gets the greeting, 
   assert.match((await (await post("say that again", { awaiting: "another", letter: "ca-foreclosure-nod" })).json()).say, /^A Notice of Default starts the foreclosure clock/);
 });
 
+test("api/decode: a carried question first at 'another' (a state the page sends) is asked, not used as a letter", T, async () => {
+  for (const transcript of ["no", "yes"]) {
+    const r = await decodeApi.POST(req("/api/decode", { body: { transcript, today: "2026-09-30",
+      state: { letter: "jury-summons", awaiting: "another", carry: ["ask:a letter from the IRS"] } } }));
+    assert.equal(r.status, 200, transcript);
+    assert.equal((await r.json()).say, "Is it a CP2000 about proposed changes to your return, a Notice of Deficiency, or a final notice before a levy?", transcript);
+  }
+});
+
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
     { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [], dateNo: false });
