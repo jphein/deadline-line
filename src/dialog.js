@@ -42,7 +42,7 @@ const DIRECT_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok"
   "dated", "i", "got", "received", "they", "served", "handed", "delivered", "posted", "mailed", "gave", "me", "to", "landlord", "my",
   "notice", "letter", "papers", "this", "that", "that's", "a", "an", "from", "for", "of", "with", "and", "by", "sent", "we", "our",
   "us", "you", "your", "here", "says", "say", "on", "in", "at", "be", "been", "came", "come", "were", "them", "him", "her",
-  "also", "just", "to", "plus", "over", "off", "dropped", "have", "has"]);
+  "also", "just", "to", "plus", "over", "off", "dropped"]);
 // Letter-specific: "printed" / "mailing" only for a letter counted from its printed or mailing date (Social Security,
 // Medi-Cal, IRS, the Franchise Tax Board, EDD, a utility, parking); "due" only for the water bill, counted from its due
 // date. For a hand-over letter ("The date printed on the notice is September 3", "The notice is due September 3") they
@@ -53,15 +53,17 @@ const allowedWord = (letter) => {
   // A notice that commonly prints its move-out date ("you must move on or before…": the 30-day, 60-day and sheriff's
   // notices): "my notice says September 3" may be that date, which counted as service errs late: the check. ("dated"
   // stays plain for them.)
-  const late = SAYS_MOVE_OUT.has(letter);
-  return (w) => (DIRECT_WORDS.has(w) && !(late && (w === "says" || w === "say"))) || (printed && ["printed", "print", "mailing"].includes(w)) || (due && w === "due");
+  return (w) => DIRECT_WORDS.has(w) || (printed && ["printed", "print", "mailing"].includes(w)) || (due && w === "due");
 };
-const SAYS_MOVE_OUT = new Set(["ca-30day-notice", "ca-60day-notice", "ca-sheriff-vacate"]);
+// The letters that state a later date of their own (a move-out, shutoff, effective, end or sale date), so "my notice
+// says September 3" may be that date, which counted as the clock's start errs late.
+const SAYS_STATED_DATE = new Set(["ca-30day-notice", "ca-60day-notice", "ca-sheriff-vacate", "ca-water-shutoff", "ca-utility-shutoff",
+  "ca-rent-increase", "ca-subsidy-end", "ca-repo-notice"]);
 // A relative day counts directly only bare: "yesterday", "it was yesterday", "I got it yesterday"; "today" (tonight, this
 // morning ...) only with nothing but filler ("today", "it was today").
 // What a plain yes at the check may carry besides the yes ("yes, thanks", "yes, bye", "yes it was", "yes, September 3"),
 // and nothing more: "yes, that's the wrong one", "yes, that is the due date", "yes, I guess", "yes, about then" aren't.
-const YES_REST = new Set(["yes", "yeah", "yep", "yup", "sure", "correct", "right", "that's", "that", "is", "okay", "ok", "please", "thanks",
+const YES_REST = new Set(["i", "yes", "yeah", "yep", "yup", "sure", "correct", "right", "that's", "that", "is", "okay", "ok", "please", "thanks",
   "thank", "you", "bye", "goodbye", "it", "it's", "was", "indeed", "exactly", "uh", "um", "oh", "well"]);
 // …or plain receipt phrasing with a receipt verb in it ("yes, that's when I got it", "yes, that's the day they gave it to
 // me"); never "due", "paid" or "printed" ("yes, that's when I paid"), and nothing without a receipt verb ("yes, the date
@@ -73,9 +75,12 @@ const yesRemainderOk = (words) => {
 };
 // The caller's own sending ("I sent the notice to my landlord on September 3") isn't the day it reached them: the check.
 // (Not a receipt said in the passive: "I was handed eviction papers", "we got it sent".)
-const SELF_SENT_FIRST = /\b(?:i|we)\s+(?:(?!was\b|were\b|got\b|been\b|have\b|had\b|am\b|are\b)\w+\s+)?(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
+// (Through "have / 've / had / just / already": "I have sent my landlord notice", "I've mailed it to the landlord". Not a
+// receipt said in the passive: "I have been handed", "I was handed".)
+const SELF_SENT_FIRST = /\b(?:i|we)(?:'ve|'d)?\s+(?:(?:have|has|had|just|already|then)\s+)*(?:(?!was\b|were\b|got\b|been\b|am\b|are\b|have\b|has\b|had\b)\w+\s+)?(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
 // …nor said the other way round: "My landlord received notice from me on September 3", "the landlord got it from me".
-const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\s+(?:received|got|was given|was handed|was sent)\b/i;
+// …and in the passive: "My notice was received by my landlord on September 3".
+const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:delivered|given|handed|sent|mailed)\s+to\s+(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\b|\b(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\s+(?:received|got|was given|was handed|was sent)\b|\b(?:received|got|signed for|signed|picked up|accepted)\s+by\s+(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\b/i;
 const SELF_SENT = { test: (t) => SELF_SENT_FIRST.test(t) || SENT_BY_CALLER.test(t) };
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
 const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
@@ -93,6 +98,13 @@ const otherWords = (t, spans = [], naming = null, dropRelative = false, onlyName
   let rest = t; for (const c of [...spans].sort((a, b) => b.start - a.start)) rest = rest.slice(0, c.start) + " " + rest.slice(c.end);
   // A "?" is never filler ("September 3?"); a stay request isn't chat ("hold on, it was September 25").
   rest = rest.replace(/\?/g, " ? ").replace(STAY_ALL, " ");
+  // "have" / "has" / "'ve" are plain only as a receipt in the perfect ("I've got it", "I have received it", "I have been
+  // handed it") or in "it has <date> on it" / "I have it dated <date>"; never "it has to be September 3" or "I have to
+  // be out by September 3", which name a date to act by.
+  rest = rest.replace(/\b(i|we)(?:'ve|\s+have|\s+has)(\s+(?:just|already))?\s+(?=(?:got|gotten|received|been\s+(?:handed|served|given|sent|mailed))\b)/gi, "$1 ")
+    .replace(/\bhas(?=\s+on\s+it\b)/gi, " ").replace(/\bhave(?=\s+it\s+dated\b)/gi, " ");
+  // At the check with a letter named ("…, I also have a 30 day notice"), "have" is having that letter.
+  if (onlyNamed && naming) rest = rest.replace(/\b(?:have|has)\b/gi, " ");
   if (dropRelative) rest = rest.replace(new RegExp(`\\b(?:${RELATIVE_DAY})\\b`, "gi"), " ");
   // (Only the named letters' own phrases with onlyNamed: at the check, "due date" is no letter's name.)
   const named = onlyNamed && naming ? new Set(naming.flatMap(id => CARRIED_ASKS.get(id)?.candidates ?? [id])) : null;
@@ -567,7 +579,10 @@ export class Dialog {
       }
       if (!date) return { kind: "unread" };
       // Direct only with one date and nothing but filler or receipt phrasing besides; else the check.
-      const direct = cands.length === 1 && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
+      // "my notice says September 3" for a letter that states a later date of its own: the check ("says" right before the
+      // date; "my landlord says my rent is going up, the notice was handed to me on September 15th" is plain).
+      const statedDate = SAYS_STATED_DATE.has(det?.letter_type ?? this.letter) && /\b(?:says|say|said|reads|shows)\s+(?:that\s+|it'?s\s+|on\s+)?$/i.test(t.slice(0, cands[0].start));
+      const direct = cands.length === 1 && !statedDate && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
       return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
     }
     if (RELATIVE.test(t) && (NEGATION.test(t) || FUTURE.test(t))) return { kind: "never" };
