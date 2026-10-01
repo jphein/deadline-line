@@ -32,6 +32,7 @@ export function localCallTool() {
   const tools = {
     detect_letter: ({ text, today, among, letter_type }) => detectLetter(text, today ?? todayIso(), among ?? [], { letterType: letter_type }),
     compute_deadline: ({ letter_type, notice_date, today }) => computeDeadline(letter_type, notice_date, today ?? todayIso()),
+    list_letter_types: () => ({ letter_types: listLetterTypes() }),
   };
   return async (name, args) => {
     if (!Object.hasOwn(tools, name)) throw new Error(`unknown tool: ${name}`);
@@ -54,7 +55,9 @@ export function cleanState(s) {
   const dateQuestion = typeof s.dateQuestion === "string" ? s.dateQuestion.slice(0, 300) : null;
   const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)
-  return { letter, date, awaiting, last, candidates, dateQuestion, hoa, hoaSaid };
+  const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
+  const carrySpoken = carry.length && typeof s.carrySpoken === "string" ? s.carrySpoken.slice(0, 300) : null;
+  return { letter, date, awaiting, last, candidates, dateQuestion, hoa, hoaSaid, carry, carrySpoken };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).

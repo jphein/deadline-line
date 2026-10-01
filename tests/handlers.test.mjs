@@ -60,6 +60,8 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["I got a notice of default on my house", "it's from my HOA", "it's from my HOA", "no"],
       ["my HOA sent a notice of default", "it's from my HOA", "no"],
       ["my friend Hoa helped me read the notice of default on my house", "no"],
+      ["the collection agency is suing me, I also got a 3 day notice", "September 28", "yes", "no", "September 25"],
+      ["the collection agency is suing me, I also got a 3 day notice", "September 28", "the summons", "a lawsuit about money", "September 25"],
       ["my HOA sent me a letter", "actually it's from my mortgage lender, a notice of default", "no"],
       ["EDD says I'm not eligible for unemployment, the notice was mailed September 10th", "bye"],
       ["I got a notice to vacate", "sixty days", "September 1st"],
@@ -83,15 +85,21 @@ test("api/decode: the SSA sample gives the real date, explains on request, and s
 test("api/decode GET: the greeting and a new conversation", T, async () => {
   const r = await decodeApi.GET(req("/api/decode"));
   assert.equal(r.status, 200); assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false } });
+  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [], carrySpoken: null } });
 });
 
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
-    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null, hoa: false, hoaSaid: false });
+    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null, hoa: false, hoaSaid: false, carry: [], carrySpoken: null });
   // Only a real boolean true survives as the HOA flag.
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoa: v }).hoa, want, String(v));
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoaSaid: v }).hoaSaid, want, String(v));
+  // The carried letters: real ids only, at most three; the spoken line only as a string, capped, and only with a carry.
+  assert.deepEqual(cleanState({ carry: ["ca-3day", "nope", "ca-3day", "ca-ud", "jury-summons", "ca-noa"] }).carry, ["ca-3day", "ca-ud", "jury-summons"]);
+  assert.deepEqual(cleanState({ carry: "ca-3day" }).carry, []);
+  assert.equal(cleanState({ carry: ["ca-3day"], carrySpoken: "x".repeat(900) }).carrySpoken.length, 300);
+  assert.equal(cleanState({ carry: ["ca-3day"], carrySpoken: { a: 1 } }).carrySpoken, null);
+  assert.equal(cleanState({ carry: [], carrySpoken: "You also mentioned…" }).carrySpoken, null);
   assert.deepEqual(cleanState({ letter: "ssa-initial", date: "2026-09-13", awaiting: "more", last: "x".repeat(5000) }).last.length, 2000);
   assert.deepEqual(cleanState("nope"), {});
   const r = await decodeApi.POST(req("/api/decode", { body: { transcript: "yes", state: { letter: "x", awaiting: "more", result: { how_we_counted_spoken: "lies" } }, today: TODAY } }));

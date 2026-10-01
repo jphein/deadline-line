@@ -46,6 +46,8 @@ export class Dialog {
     this.dateQuestion = null;     // how to ask for this letter's date ("What day were the papers handed to you?")
     this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
     this.hoaSaid = false;         // the HOA step was already spoken for this letter (reset() clears it for the next one)
+    this.carry = [];              // a second letter the caller named in the same turn ("…, I also got a 3 day notice"), next
+    this.carrySpoken = null;      // the engine's "You also mentioned …; tell me about that next."
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
@@ -54,12 +56,13 @@ export class Dialog {
     if (done) { this.hoa = false; this.hoaSaid = false; }   // a finished conversation's HOA mention isn't the next one's
     return { say: text, done };
   }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; this.carrySpoken = null; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
-    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa, hoaSaid: this.hoaSaid };
+    return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa, hoaSaid: this.hoaSaid,
+      carry: this.carry, carrySpoken: this.carrySpoken };
   }
 
   /** Pick a conversation back up from snapshot(). */
@@ -68,6 +71,7 @@ export class Dialog {
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
     dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
+    dialog.carry = snap.carry ?? []; dialog.carrySpoken = snap.carrySpoken ?? null;
     if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
     return dialog;
   }
@@ -82,10 +86,14 @@ export class Dialog {
         this.awaiting = "text";
         return this.say(`Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`);
       }
+      if (NO.test(t) && this.carry.length) return this.startCarry("Okay. ");
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
     if (this.awaiting === "text") {
-      if (YES.test(t)) { this.awaiting = null; return this.say("Okay. In the real service I'd text the date and a calendar reminder to this number. " + this.closing(), true); }
+      const texted = "Okay. In the real service I'd text the date and a calendar reminder to this number. ";
+      // A letter the caller also named comes next, rather than the goodbye.
+      if (this.carry.length && (YES.test(t) || NO.test(t))) return this.startCarry(YES.test(t) ? texted : "Okay. ");
+      if (YES.test(t)) { this.awaiting = null; return this.say(texted + this.closing(), true); }
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
     // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
@@ -97,11 +105,17 @@ export class Dialog {
       if (step && this.hoaSaid) return this.say(`Yes, I've included the homeowners association step for this notice. ${ask}`);
       if (step) { this.hoaSaid = true; return this.say(`${step} ${ask}`); }
     }
+    let switched = null;
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
-      if ((NO.test(t) || BYE.test(t)) && !LETTERISH.test(t)) return this.goodbye();
+      if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();
+      const carry = this.carry;
+      if (!carry.length && NO.test(t) && !LETTERISH.test(t)) return this.goodbye();
       this.reset();
-      if (YES.test(t) && !LETTERISH.test(t)) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
+      // The letter the caller also named: this turn is about it (its date, or just "okay").
+      if (carry.length) { [switched, ...this.carry] = carry; this.letter = switched; }
+      else if (YES.test(t) && !LETTERISH.test(t)) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
     }
+    const answered = this.awaiting === "more" || this.awaiting === "text";
     if (BYE.test(t) && !/\bletter|notice|papers\b/i.test(t)) return this.goodbye();
 
     // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
@@ -109,6 +123,11 @@ export class Dialog {
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
+    // After an answer, a "which one?" is about a new letter ("the summons"): not the one just answered.
+    if (answered && this.candidates.length) { this.letter = null; this.date = null; }
+    // A second letter named in the same turn is carried, to be taken up after this one.
+    if (det.also_detected?.length) { this.carry = det.also_detected; this.carrySpoken = det.also_detected_spoken ?? null; }
+    if (this.carry.length && det.recognized) this.carry = this.carry.filter(id => id !== det.letter_type);
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
 
@@ -116,6 +135,11 @@ export class Dialog {
     // A different sender named ("…actually it's from my mortgage lender") clears an earlier HOA mention; a corrected
     // letter from the same sender ("my HOA gave me a 3 day notice" → "actually it's a notice of default") doesn't.
     else if (LENDER.test(t)) this.hoa = false;
+    if (switched && !det.recognized) {
+      const info = await this.letterInfo(switched);
+      if (!this.date && info.needs_date === false) return this.answer(t);
+      if (!this.date) { this.awaiting = "date"; return this.say(`Okay, about ${info.short}. ${ASK_DATE}`); }
+    }
     if (this.letter && (this.date || (det.recognized && det.needs_date === false))) return this.answer(t);
     if (this.candidates.length) { this.awaiting = "letter"; return this.say(det.speech); }
     if (this.letter) {
@@ -146,7 +170,8 @@ export class Dialog {
       : r.passed
         ? `That deadline was ${r.deadline_spoken}. It may not be too late: ask for more time in writing, and call free legal aid today.`
         : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
-    const next = counted ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
+    const carried = this.carry.length && this.carrySpoken ? `${this.carrySpoken} ` : "";
+    const next = carried + (counted ? "Want me to explain how I counted?" : this.carry.length ? "What date is on it?" : "Do you have another letter I can help with?");
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
     // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).
@@ -155,6 +180,22 @@ export class Dialog {
     this.hoa = false;                   // said once, for this letter
     if (hoa) this.hoaSaid = true;
     return this.say(`${head} ${r.what_to_do}.${also} First step: ${r.next_steps[0]}${hoa ? ` ${hoa}` : ""} ${r.help_spoken ?? `For free help: ${r.free_help[0].name}, ${r.free_help[0].how}.`} ${next}`);
+  }
+
+  /** Take up the letter the caller also named: ask its date (or answer it, when it has none). */
+  async startCarry(prefix) {
+    const [id, ...rest] = this.carry;
+    this.reset(); this.carry = rest; this.letter = id;
+    const info = await this.letterInfo(id);
+    if (info.needs_date === false) { const a = await this.answer(); return this.say(prefix + a.say); }
+    this.awaiting = "date";
+    return this.say(`${prefix}Now, about ${info.short}. ${ASK_DATE}`);
+  }
+
+  async letterInfo(id) {
+    const all = (this.types ??= (await this.call("list_letter_types", {})).letter_types);
+    const t = all.find(x => x.id === id) ?? { title: "other letter", needs_date: true };
+    return { ...t, short: t.title.replace(/^California: /, "") };
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
