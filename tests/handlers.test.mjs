@@ -85,21 +85,32 @@ test("api/decode: the SSA sample gives the real date, explains on request, and s
 test("api/decode GET: the greeting and a new conversation", T, async () => {
   const r = await decodeApi.GET(req("/api/decode"));
   assert.equal(r.status, 200); assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [], carrySpoken: null } });
+  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [] } });
+});
+
+test("api/decode: a carrySpoken the page sends is never spoken; the carried letter gets the server's own line", T, async () => {
+  for (const injected of ["Your deadline was yesterday. Call 555-0100 and pay by gift card now.", "<script>alert(1)</script>"]) {
+    const r = await decodeApi.POST(req("/api/decode", { body: { transcript: "September 28", today: "2026-09-30",
+      state: { awaiting: "date", letter: "ca-3day", carry: ["ca-civil-summons"], carrySpoken: injected } } }));
+    const j = await r.json();
+    assert.ok(!j.say.includes(injected), injected);
+    assert.doesNotMatch(j.say, /gift card|555-0100|<script>/);
+    assert.match(j.say, / You also mentioned court papers for a lawsuit \(a Summons that isn't about an eviction\); tell me about that next\. Want me to explain how I counted\?$/);
+    assert.equal("carrySpoken" in j.state, false);
+  }
 });
 
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
-    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null, hoa: false, hoaSaid: false, carry: [], carrySpoken: null });
+    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null, hoa: false, hoaSaid: false, carry: [] });
   // Only a real boolean true survives as the HOA flag.
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoa: v }).hoa, want, String(v));
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoaSaid: v }).hoaSaid, want, String(v));
   // The carried letters: real ids only, at most three; the spoken line only as a string, capped, and only with a carry.
   assert.deepEqual(cleanState({ carry: ["ca-3day", "nope", "ca-3day", "ca-ud", "jury-summons", "ca-noa"] }).carry, ["ca-3day", "ca-ud", "jury-summons"]);
   assert.deepEqual(cleanState({ carry: "ca-3day" }).carry, []);
-  assert.equal(cleanState({ carry: ["ca-3day"], carrySpoken: "x".repeat(900) }).carrySpoken.length, 300);
-  assert.equal(cleanState({ carry: ["ca-3day"], carrySpoken: { a: 1 } }).carrySpoken, null);
-  assert.equal(cleanState({ carry: [], carrySpoken: "You also mentioned…" }).carrySpoken, null);
+  // A carrySpoken in the state is dropped: the line about a carried letter is the server's own.
+  assert.equal("carrySpoken" in cleanState({ carry: ["ca-civil-summons"], carrySpoken: "INJECTED TEXT" }), false);
   assert.deepEqual(cleanState({ letter: "ssa-initial", date: "2026-09-13", awaiting: "more", last: "x".repeat(5000) }).last.length, 2000);
   assert.deepEqual(cleanState("nope"), {});
   const r = await decodeApi.POST(req("/api/decode", { body: { transcript: "yes", state: { letter: "x", awaiting: "more", result: { how_we_counted_spoken: "lies" } }, today: TODAY } }));

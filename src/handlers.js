@@ -55,9 +55,10 @@ export function cleanState(s) {
   const dateQuestion = typeof s.dateQuestion === "string" ? s.dateQuestion.slice(0, 300) : null;
   const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)
+  // The carried letters: real ids only, at most three. Nothing the page sends is spoken: what's said about them is
+  // rebuilt on the server from these ids (a carrySpoken in the state is dropped).
   const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
-  const carrySpoken = carry.length && typeof s.carrySpoken === "string" ? s.carrySpoken.slice(0, 300) : null;
-  return { letter, date, awaiting, last, candidates, dateQuestion, hoa, hoaSaid, carry, carrySpoken };
+  return { letter, date, awaiting, last, candidates, dateQuestion, hoa, hoaSaid, carry };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).

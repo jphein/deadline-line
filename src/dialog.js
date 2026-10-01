@@ -47,7 +47,6 @@ export class Dialog {
     this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
     this.hoaSaid = false;         // the HOA step was already spoken for this letter (reset() clears it for the next one)
     this.carry = [];              // a second letter the caller named in the same turn ("…, I also got a 3 day notice"), next
-    this.carrySpoken = null;      // the engine's "You also mentioned …; tell me about that next."
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
@@ -56,13 +55,13 @@ export class Dialog {
     if (done) { this.hoa = false; this.hoaSaid = false; }   // a finished conversation's HOA mention isn't the next one's
     return { say: text, done };
   }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; this.carrySpoken = null; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
     return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa, hoaSaid: this.hoaSaid,
-      carry: this.carry, carrySpoken: this.carrySpoken };
+      carry: this.carry };
   }
 
   /** Pick a conversation back up from snapshot(). */
@@ -71,7 +70,7 @@ export class Dialog {
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
     dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
-    dialog.carry = snap.carry ?? []; dialog.carrySpoken = snap.carrySpoken ?? null;
+    dialog.carry = snap.carry ?? [];
     if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
     return dialog;
   }
@@ -126,7 +125,7 @@ export class Dialog {
     // After an answer, a "which one?" is about a new letter ("the summons"): not the one just answered.
     if (answered && this.candidates.length) { this.letter = null; this.date = null; }
     // A second letter named in the same turn is carried, to be taken up after this one.
-    if (det.also_detected?.length) { this.carry = det.also_detected; this.carrySpoken = det.also_detected_spoken ?? null; }
+    if (det.also_detected?.length) this.carry = det.also_detected;
     if (this.carry.length && det.recognized) this.carry = this.carry.filter(id => id !== det.letter_type);
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
@@ -170,7 +169,8 @@ export class Dialog {
       : r.passed
         ? `That deadline was ${r.deadline_spoken}. It may not be too late: ask for more time in writing, and call free legal aid today.`
         : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
-    const carried = this.carry.length && this.carrySpoken ? `${this.carrySpoken} ` : "";
+    // What's said about a carried letter is built here, from its id: never a sentence the page sent back.
+    const carried = this.carry.length ? `${await this.carryLine()} ` : "";
     const next = carried + (counted ? "Want me to explain how I counted?" : this.carry.length ? "What date is on it?" : "Do you have another letter I can help with?");
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
@@ -196,6 +196,13 @@ export class Dialog {
     const all = (this.types ??= (await this.call("list_letter_types", {})).letter_types);
     const t = all.find(x => x.id === id) ?? { title: "other letter", needs_date: true };
     return { ...t, short: t.title.replace(/^California: /, "") };
+  }
+
+  /** "You also mentioned …; tell me about that next.", from the carried ids and the engine's titles. */
+  async carryLine() {
+    const names = [];
+    for (const id of this.carry) names.push((await this.letterInfo(id)).short);
+    return `You also mentioned ${names.join(" and ")}; tell me about that next.`;
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
