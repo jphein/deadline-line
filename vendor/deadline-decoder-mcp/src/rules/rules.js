@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ a960445b16f738ad759e0f8f003a76d1d0037b0b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ c7453452e36dbae4a27e2eed2be919e9ab331e3d), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -203,7 +203,7 @@ export const RULES = [
   {
     id: "ca-ud",
     family: "housing", confidence: "SOLID", anchor: "served",
-    spoken: /\beviction papers\b|unlawful detainer|\b(filed|filing|file) (an |the )?eviction\b|\bsu(ed|ing) (me )?to evict|\b(summons|court papers)\b.*\b(evict\w*|landlord|rent|tenant)\b|\b(evict\w*|landlord|rent)\b.*\b(summons|court papers)\b/i,
+    spoken: /\beviction papers\b|unlawful detainer|\b(filed|filing|file) (an |the )?eviction\b|\bsu(ed|ing) (me )?to evict|\b(summons|court papers)\b.*\b(evict\w*|landlord|rent|tenant)\b|\b(evict\w*|landlord|rent)\b.*\b(summons|court papers)\b|\bserved (me |you )?(with )?(court |legal |the )?papers\b.*\bevict\w*|\bevict\w*.*\bserved (me |you )?(with )?(court |legal |the )?papers\b/i,
     // "UD" only in capitals (so "ud" inside other words, or Spanish "Ud.", isn't it); a sentence-final "UD." is.
     spokenCase: /\bUD\b/,
     answers: /\b(evict\w*|landlord|rent|tenant|apartment|housing|move out)\b/i,
@@ -281,7 +281,7 @@ export const RULES = [
     unhedge: true,              // nor is it a summons
     detect: [/\bsummons\b|citaci[oó]n judicial/i, /\b(complaint|plaintiff|demandante)\b/i, /\b(30|thirty) (calendar )?days\b/i],
     not: /unlawful detainer|eviction|desalojo/i,
-    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b|\bcollections?\b.*\b(summons|court papers)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\b(debt collector|collection agency|collections?|credit card company)\b.{0,40}(?<!\b(may|might|could) have )\b(sued|is suing|are suing) me\b/i,
+    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b|\bcollections?\b.*\b(summons|court papers)\b|^(?!.*\b(evict\w*|unlawful detainer|UD|notice to (quit|vacate|pay rent)|3[- ]day notice)\b).*\b(debt collector|collection agency|collections?|credit card company)\b(?:(?!\blandlord)[^]){0,40}(?<!\b(may|might|could) have )\b(sued|is suing|are suing) me\b/i,
     answers: /\b(money|debt|owe|lawsuit|sued|suing|collect\w*|credit card|loan|bill)\b/i,
     keyterms: ["summons", "complaint", "lawsuit", "debt collector"],
     headline: "File a written response with the court",
@@ -1161,8 +1161,11 @@ export const AMBIGUOUS = [
   { spoken: /\b(may|might|could) have (been )?(served|sued)\b/i, candidates: ["ca-civil-summons", "debt-validation"],
     question: "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?",
     // Its own answers, in order: court papers first ("I got a summons"), then the letter ("just the letter").
-    answers: [["ca-civil-summons", /^(?!.*\bno (court )?papers\b).*\b(court papers|papers|summons|lawsuit|sued|court)\b/i],
-      ["debt-validation", /\b(letter|notice|collector|just|only|not yet|no)\b/i]] },
+    // A court word that's denied ("I didn't get a summons", "no summons") or only in the letter ("the letter mentions a
+    // lawsuit") is the letter; "both" is the summons, whose court clock matters most. A bare "no" (to an either-or
+    // question) settles nothing, so it's asked again, like a bare "yes".
+    answers: [["ca-civil-summons", /^(?!.*\b(no|not|didn'?t|haven'?t|hasn'?t|never|without)\b[^,.;!?]{0,15}?\b(court papers|papers|summons|lawsuit|sued|served)\b)(?!.*\bletter (says|said|mentions|talks about)\b).*\b(court papers|papers|summons|lawsuit|sued|court|both)\b/i],
+      ["debt-validation", /^(?!\W*(no|nope|nah)\W*$).*\b(letter|notice|collector|just|only|not yet|no|not|didn'?t|haven'?t|never)\b/i]] },
   { spoken: /\bsummons\b|\bcourt papers\b/i, candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
     question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
   { spoken: /notice to (vacate|move out|terminate)|terminat\w* (of )?(my |the )?tenancy|move[- ]out notice|telling me to move out/i, candidates: ["ca-30day-notice", "ca-60day-notice"],
