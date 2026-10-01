@@ -441,13 +441,17 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
       "Hoa sent me a text about the notice of default on my house", "Hoa gave me a ride to court, I got a notice of default",
       "Hoa mailed me a copy of my notice of default", "Hoa filed my papers, I have a notice of default on my house",
       "Hoa sent me my bank's notice of default", "Hoa sent me a photo of the notice of default, she's my sister",
-      "Hoa sent me my notice of default from the mailbox"]) {
+      "Hoa sent me my notice of default from the mailbox",
+      // A lender in the same turn: the title-cased "Hoa" may be a name.
+      "Hoa sent me a letter about my bank's notice of default", "Hoa sent me a notice of default from my mortgage lender"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
     for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default",
       // ASR's own output for a spoken "hoa" opening the sentence (measured, AssemblyAI streaming).
       "Hoa sent me the Notice of Default.", "I got a notice of default. Hoa is foreclosing on my condo.",
-      "Hoa mailed a notice of default to my house", "Hoa sent us a notice of trustee's sale"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+      "Hoa mailed a notice of default to my house", "Hoa sent us a notice of trustee's sale",
+      // A real HOA still wins over a lender in the same turn.
+      "my HOA and my bank both sent a notice of default"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
     // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
     const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
     assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
