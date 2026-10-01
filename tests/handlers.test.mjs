@@ -58,6 +58,8 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["my HOA sent me a letter", "a notice of default", "no"],
       ["I got a notice of default on my house", "it's from my HOA", "no"],
       ["I got a 3 day notice", "no", "no", "no", "September 28"],
+      ["I got a 3 day notice dated September 28", "no, but I also got an eviction summons", "September 25"],
+      ["I got a 30 day notice", "no", "no", "thanks, I also got an unlawful detainer"],
       ["I got a 3 day notice", "no", "no", "say that again", "yes"],
       // (A repeat once a carried question is open is, through the page, the question alone; the phone line repeats its
       // full last line. The same accepted "rebuilt, not verbatim" class as #24, so no repeat in these parity flows.)

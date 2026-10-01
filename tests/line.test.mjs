@@ -604,6 +604,7 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     assert.doesNotMatch(go[1].say, /What date is on it|What day/);   // "yes" answers it, no date asked
     const stop = await run(["I got a jury summons, plus a notice of default", "no"]);
     assert.equal(stop[1].done, true);
+    assert.equal(stop[1].say, "Okay. When you're ready, call back about the Notice of Default. This is general information, not legal advice. Goodbye.");
     // A carried question: with nothing to count first, it's asked at once; after a counted answer, where the carried
     // letter would come in; "no" twice at the date question goes on to it too.
     const asked = await run(["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"]);
@@ -627,7 +628,7 @@ test("dialog: 'no' twice to the date question offers to stop, or goes on to a le
     const run = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const out = []; for (const t of turns) out.push({ ...(await d.handle(t)), letter: d.letter, awaiting: d.awaiting }); return out; };
     const stop = await run(["I got a 3 day notice", "no", "no", "yes"]);
     assert.match(stop[1].say, /^I still need the date on the letter\./);
-    assert.equal(stop[2].say, "Do you want to stop here?");
+    assert.equal(stop[2].say, "If you find the date, call back right away: some of these run out in days. Do you want to stop here?");
     assert.equal(stop[3].done, true);
     const keep = await run(["I got a 3 day notice", "no", "no", "no", "September 28"]);
     assert.match(keep[3].say, /^Okay\. What date is on it\?/); assert.equal(keep[4].letter, "ca-3day"); assert.match(keep[4].say, /^Your deadline is/);
@@ -675,6 +676,42 @@ test("dialog: every letter is named well when it's carried ('Now, about …', 'Y
       assert.doesNotMatch(line, /\bmy\b|California:|[()]/, id);
       if (needs_date) assert.match((await d.startCarry("")).say, new RegExp(`^Now, about ${carry_title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\. What date is on it\\?`), id);
     }
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a yes, no or goodbye that names a letter is about that letter, at every stage (the decoder decides)", async () => {
+  const mcp = await startMcp();
+  try {
+    const at = async (setup, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t); return { ...(await d.handle(reply)), letter: d.letter, awaiting: d.awaiting }; };
+    const MORE = ["I got a 3 day notice dated September 28"], TEXT = [...MORE, "yes"], STOP = ["I got a 30 day notice", "no", "no"];
+    // After a deadline ("explain how I counted?") and at the text offer: not a goodbye, not a dropped letter.
+    for (const [setup, reply, letter, say] of [
+      [MORE, "no, but I also got an eviction summons", "ca-ud", /^Got it: California: court papers for an eviction/],
+      [MORE, "bye, actually I have a jury summons", "jury-summons", /^A jury summons prints its own date/],
+      [MORE, "yes, and I also got a parking ticket", "ca-parking-ticket", /^Got it: California: a parking ticket/],
+      [MORE, "no, I also got a notice of default", "ca-foreclosure-nod", /^A Notice of Default starts the foreclosure clock/],
+      [TEXT, "no, but I also got an eviction summons", "ca-ud", /^Got it: California: court papers for an eviction/],
+      [TEXT, "yes, and I also got a parking ticket", "ca-parking-ticket", /^Got it: California: a parking ticket/],
+      [TEXT, "bye, actually I have a jury summons", "jury-summons", /^A jury summons prints its own date/],
+      // At the stop offer, words outside a fixed list: the decoder hears the letter.
+      [STOP, "thanks, I also got an unlawful detainer", "ca-ud", /^Got it: California: court papers for an eviction/],
+      [STOP, "yes, and a CP2000 from the IRS", "irs-cp2000", /^Got it: IRS: a CP2000 notice/]]) {
+      const r = await at(setup, reply);
+      assert.equal(r.done, false, reply); assert.equal(r.letter, letter, reply); assert.match(r.say, say, reply);
+    }
+    // Documented: what the decoder doesn't recognize isn't a letter. "no, the landlord also sued me" at the stop offer is
+    // a "no" (don't stop): the date question again.
+    assert.match((await at(STOP, "no, the landlord also sued me")).say, /^Okay\. What day was the notice handed to you\?/);
+    // The plain replies are unchanged.
+    assert.equal((await at(MORE, "no")).done, true);
+    assert.match((await at(MORE, "yes")).say, /^Here's how I counted\./);
+    // A bare yes or no to a which-kind question the decoder can't settle: the same question again.
+    for (const reply of ["yes", "no"]) {
+      const r = await at(["I got a notice of default on my house, I also got a summons"], reply);
+      assert.equal(r.say, "Is it about an eviction, a lawsuit about money, or jury duty?", reply); assert.equal(r.awaiting, "letter");
+    }
+    // …while an answer the decoder does settle still settles it (the hearing ask's "no" is "not yet").
+    assert.equal((await at(["social security denied me again and my hearing is scheduled"], "no")).letter, "ssa-recon");
   } finally { await mcp.close(); }
 });
 
