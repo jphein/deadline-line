@@ -14,7 +14,7 @@ export const TOKEN_URL = "https://streaming.assemblyai.com/v3/token";
 export const TOKEN_TTL_S = 60;       // the token must open its session within this; AssemblyAI allows 1 to 600
 export const SAMPLE_RATE = 16000;    // what public/pcm-worklet.js sends
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_BODY = 16 * 1024, MAX_TRANSCRIPT = 2000, MAX_LAST = 2000;
+const MAX_BODY = 16 * 1024, MAX_TRANSCRIPT = 2000;
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
@@ -50,14 +50,14 @@ export function cleanState(s) {
   const date = typeof s.date === "string" && ISO_DATE.test(s.date) ? s.date : null;
   let awaiting = AWAITING.has(s.awaiting) ? s.awaiting : null;
   if (awaiting === "more" && !(letter && date)) awaiting = null;     // "how did you count?" needs a deadline
-  const last = typeof s.last === "string" ? s.last.slice(0, MAX_LAST) : undefined;
   const candidates = Array.isArray(s.candidates) ? [...new Set(s.candidates.filter(c => LETTERS.has(c)))].slice(0, 5) : [];
-  const dateQuestion = typeof s.dateQuestion === "string" ? s.dateQuestion.slice(0, 300) : null;
   const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)
+  // The carried letters: real ids only, at most three. No sentence the page sends is spoken: its ids, dates and flags
+  // only select the server's own text (a carrySpoken in the state is dropped).
   const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
-  const carrySpoken = carry.length && typeof s.carrySpoken === "string" ? s.carrySpoken.slice(0, 300) : null;
-  return { letter, date, awaiting, last, candidates, dateQuestion, hoa, hoaSaid, carry, carrySpoken };
+  // No text from the page is kept: "last" and "dateQuestion" are rebuilt by Dialog.restore() from the letter and the stage.
+  return { letter, date, awaiting, candidates, hoa, hoaSaid, carry };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).
