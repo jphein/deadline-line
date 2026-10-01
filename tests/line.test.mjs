@@ -443,7 +443,8 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
       "Hoa sent me my bank's notice of default", "Hoa sent me a photo of the notice of default, she's my sister",
       "Hoa sent me my notice of default from the mailbox",
       // A lender in the same turn: the title-cased "Hoa" may be a name.
-      "Hoa sent me a letter about my bank's notice of default", "Hoa sent me a notice of default from my mortgage lender"]) {
+      "Hoa sent me a letter about my bank's notice of default", "Hoa sent me a notice of default from my mortgage lender",
+      "Hoa sent me a letter about the bank notice of default"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
     for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default",
@@ -451,7 +452,9 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
       "Hoa sent me the Notice of Default.", "I got a notice of default. Hoa is foreclosing on my condo.",
       "Hoa mailed a notice of default to my house", "Hoa sent us a notice of trustee's sale",
       // A real HOA still wins over a lender in the same turn.
-      "my HOA and my bank both sent a notice of default"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+      "my HOA and my bank both sent a notice of default",
+      // A lender only mentioned, not the sender, doesn't beat it; nothing beats "Hoa is foreclosing".
+      "Hoa sent me the Notice of Default. My mortgage is fine.", "Hoa is foreclosing on my condo, my bank says it's behind them"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
     // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
     const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
     assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
@@ -540,6 +543,25 @@ test("dialog: the served-already ask hears 'no summons' as the letter, 'both' as
     const ud = new Dialog(mcp.callTool, { today: "2026-09-30" });
     await ud.handle("my landlord served me with papers for an eviction");
     assert.equal(ud.letter, "ca-ud");
+  } finally { await mcp.close(); }
+});
+
+test("dialog: papers served with a 3-day notice are asked about; a lawsuit from a collector is asked about; 'the letter says they sued me' is asked again", async () => {
+  const mcp = await startMcp();
+  try {
+    const PAPERS = "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?";
+    const notice = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    assert.equal((await notice.handle("a debt collector served me with papers about a 3 day notice")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
+    assert.equal(notice.letter, null);
+    await notice.handle("an eviction");
+    assert.equal(notice.letter, "ca-ud");
+    const lawsuit = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    assert.equal((await lawsuit.handle("the lawsuit from the collection agency")).say, PAPERS);
+    assert.equal(lawsuit.letter, null);
+    const again = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await again.handle("The debt collector says you may have been served already with a lawsuit.");
+    assert.equal((await again.handle("the letter says they sued me")).say, PAPERS);
+    assert.equal(again.letter, null);
   } finally { await mcp.close(); }
 });
 

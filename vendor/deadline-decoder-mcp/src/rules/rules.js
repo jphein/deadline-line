@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ c7453452e36dbae4a27e2eed2be919e9ab331e3d), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 308854d59bb8ba77f551975cf415351fa0a9dad8), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -281,7 +281,7 @@ export const RULES = [
     unhedge: true,              // nor is it a summons
     detect: [/\bsummons\b|citaci[oó]n judicial/i, /\b(complaint|plaintiff|demandante)\b/i, /\b(30|thirty) (calendar )?days\b/i],
     not: /unlawful detainer|eviction|desalojo/i,
-    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b|\bcollections?\b.*\b(summons|court papers)\b|^(?!.*\b(evict\w*|unlawful detainer|UD|notice to (quit|vacate|pay rent)|3[- ]day notice)\b).*\b(debt collector|collection agency|collections?|credit card company)\b(?:(?!\blandlord)[^]){0,40}(?<!\b(may|might|could) have )\b(sued|is suing|are suing) me\b/i,
+    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b|\bcollections?\b.*\b(summons|court papers)\b|^(?!.*\b(evict\w*|unlawful detainer|UD|notice to (quit|vacate|pay rent)|3[- ]day notice)\b).*\b(debt collector|collection agency|collections?|credit card company)\b(?:(?!\blandlord)[^]){0,40}(?<!\b(may|might|could) have )\b((sued|is suing|are suing) me|filed (a |the )?(lawsuit|suit|case) against me)\b/i,
     answers: /\b(money|debt|owe|lawsuit|sued|suing|collect\w*|credit card|loan|bill)\b/i,
     keyterms: ["summons", "complaint", "lawsuit", "debt collector"],
     headline: "File a written response with the court",
@@ -827,7 +827,7 @@ export const RULES = [
     // (the IRS, FTB, EDD, Social Security, child support, a county or court): the validation rules cover debt collectors.
     // An actual suit (being sued, papers, a summons), not the boilerplate a validation notice carries ("if you are sued",
     // "we will not sue you", "the law limits how long you can be sued", "may be eligible for small claims").
-    not: /\b((sued|sues|suing|took|taking|filed) me\b|filed (a|the) (suit|lawsuit|case)|summons|court papers|(a|the) complaint (was |has been )?filed|complaint against you|served (me |you )?with|(been|got) served|served papers|small claims (papers|court papers|claim|case|hearing)|plaintiff'?s claim|SC-?100)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court (fines?|fees?|costs)|trash|garbage|recycling)\b/i,
+    not: /\b((sued|sues|suing|took|taking|filed) me\b|filed (a|the) (suit|lawsuit|case)|lawsuit (from|by) (the |a |my )?(debt collector|collection agency|collections?|collector)|(collector|agency|collections)'s lawsuit|summons|court papers|(a|the) complaint (was |has been )?filed|complaint against you|served (me |you )?with|(been|got) served|served papers|small claims (papers|court papers|claim|case|hearing)|plaintiff'?s claim|SC-?100)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court (fines?|fees?|costs)|trash|garbage|recycling)\b/i,
     detect: [/debt collect\w*|collection agency|collector/i, /validation|dispute|verif\w*/i, /\b(owe|balance|creditor|debt)\b/i],
     spoken: /^(?!.*\b((sued|suing) me|filed (a|the) (suit|lawsuit|case)|summons|court papers)\b).*(debt collect\w*|collection agency|\b(sent|went|gone|turned over) (\w+ ){0,3}to collections\b|\bcollections? (letter|notice|agency|company)\b|validation notice)/is,
     answers: /\b(collect\w*|collector|debt)\b/i,
@@ -1158,15 +1158,25 @@ export const AMBIGUOUS = [
     answers: [["ssa-recon", /^(?!.*\b(ruled|lost|against me|said no|turned (me )?down|(?<!(haven'?t|have not|hasn'?t|has not|didn'?t|not yet) )(had (it|my hearing|the hearing)|went)|heard back|the decision)\b)(\W*(no|nope|not yet)\b|.*\b(not yet|haven'?t|have not|hasn'?t|has not|scheduled|set for|coming( up)?|waiting|next (week|month))\b)/is],
               ["ssa-appeals-council", /^\W*(yes|yeah|yep|i did)\b|\b(already|had it|had (my|the) hearing|went to (it|the hearing|my hearing)|the judge|lost|ruled|it was|heard back|went|the decision)\b/i]] },
   // "The debt collector says you may have been served already with a lawsuit.": a lawsuit, or still just the letter?
-  { spoken: /\b(may|might|could) have (been )?(served|sued)\b/i, candidates: ["ca-civil-summons", "debt-validation"],
+  // So does a bare "lawsuit" from a collector ("the lawsuit from the collection agency"): papers, or still the letter?
+  { spoken: /\b(may|might|could) have (been )?(served|sued)\b|\blawsuit (from|by) (the |a |my )?(debt collector|collection agency|collections?|collector)\b|\b(collector|agency|collections)'s lawsuit\b/i, candidates: ["ca-civil-summons", "debt-validation"],
     question: "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?",
     // Its own answers, in order: court papers first ("I got a summons"), then the letter ("just the letter").
     // A court word that's denied ("I didn't get a summons", "no summons") or only in the letter ("the letter mentions a
     // lawsuit") is the letter; "both" is the summons, whose court clock matters most. A bare "no" (to an either-or
     // question) settles nothing, so it's asked again, like a bare "yes".
-    answers: [["ca-civil-summons", /^(?!.*\b(no|not|didn'?t|haven'?t|hasn'?t|never|without)\b[^,.;!?]{0,15}?\b(court papers|papers|summons|lawsuit|sued|served)\b)(?!.*\bletter (says|said|mentions|talks about)\b).*\b(court papers|papers|summons|lawsuit|sued|court|both)\b/i],
+    answers: [
+      // "the letter says they sued me" (not denied) may mean papers came too: asked again.
+      [null, /^(?!.*\b(no|not|haven'?t|hasn'?t|didn'?t|never|won'?t)\b).*\bletter (says|said)\b.*\b(sued|lawsuit)\b/i],
+      ["ca-civil-summons", /^(?!.*\b(no|not|didn'?t|haven'?t|hasn'?t|never|without)\b[^,.;!?]{0,15}?\b(court papers|papers|summons|lawsuit|sued|served)\b)(?!.*\bletter (says|said|mentions|talks about)\b).*\b(court papers|papers|summons|lawsuit|sued|court|both)\b/i],
       ["debt-validation", /^(?!\W*(no|nope|nah)\W*$).*\b(letter|notice|collector|just|only|not yet|no|not|didn'?t|haven'?t|never)\b/i]] },
   { spoken: /\bsummons\b|\bcourt papers\b/i, candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
+    question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
+  // Papers served together with a notice to quit or a 3-day notice may be an eviction (10 court days) or a money
+  // lawsuit (30 days): asked, even over the rules' pick, so a UD isn't answered with the later deadline.
+  { preempt: true,
+    spoken: /\bserved (me |you )?(with )?(court |legal |the )?papers\b.*\b(3[- ]day notice|notice to (quit|vacate|pay rent))\b|\b(3[- ]day notice|notice to (quit|vacate|pay rent))\b.*\bserved (me |you )?(with )?(court |legal |the )?papers\b/i,
+    candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
     question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
   { spoken: /notice to (vacate|move out|terminate)|terminat\w* (of )?(my |the )?tenancy|move[- ]out notice|telling me to move out/i, candidates: ["ca-30day-notice", "ca-60day-notice"],
     question: "Does the notice give you 30 days or 60 days?" },
