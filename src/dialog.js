@@ -21,7 +21,8 @@ const HOA_CASED = /\b(HOA|hoa|H O A)\b/;
 // and only as the one sending the notice itself or foreclosing, so the name still isn't an HOA: "Hoa is my name",
 // "Hoa sent me a text about…", "Hoa sent me my bank's notice…", "Hoa filed my papers…".
 const HOA_INITIAL = /(^|[.!?]\s+)Hoa ((sent|mailed|gave|filed)( me| us)?( an?| the)? ([Nn]otice|[Ll]etter|[Ll]ien)\b|is (foreclosing|selling|auctioning)\b)/;
-const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) || HOA_INITIAL.test(t) };
+// A lender named in the same turn beats the title-cased "Hoa" (it may be a name); a real "HOA" still wins.
+const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) || (HOA_INITIAL.test(t) && !LENDER.test(t)) };
 // The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
 const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
