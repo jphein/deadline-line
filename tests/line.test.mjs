@@ -1394,6 +1394,43 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
     for (const setup of [DATE, STOP]) assert.match((await at(setup, "yesterday, today")).say, /^Just to check: /);   // two relative days
 
     for (const reply of ["yes", "yes, thanks", "yes, bye", "yes it was", "yes, September 3"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // X17: a letter named with a yes at the check: the letter's words aside, the rest must still be a plain yes; if it
+    // isn't, the date is asked again and the letter carried. "yes, and I also got a summons" counts, then carries.
+    for (const [reply, carried] of [["Yes, that is the due date. I also got a 30 day notice.", "ca-30day-notice"], ["yes, but that's the due date, and I also got a summons", "ask:a summons or court papers"]]) {
+      const r = await at(CHECKED, reply);
+      assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], reply); assert.doesNotMatch(r.say, /deadline/i, reply); assert.ok(r.d.carry.includes(carried), reply);
+    }
+    const yesAnd = await at(CHECKED, "yes, and I also got a summons");
+    assert.match(yesAnd.say, /^That deadline was Wednesday, September 9, 2026\./); assert.deepEqual(yesAnd.d.carry, ["ask:a summons or court papers"]);
+    // X17 at all six classes, and end to end from three entries: a named letter with a yes that isn't plain never counts
+    // the held date; the letter is carried. "yes, and I also got a summons" counts, then carries.
+    const CLASSES = [CHECKED, ["I got a 30 day notice", "September 3, thanks"], HELD60, ["I got eviction papers", "September 3, thanks"],
+      ["they're turning off my water", "September 3, thanks"], ["I got a letter from Social Security, they denied my disability again", "September 3, thanks"]];
+    for (const setup of CLASSES) {
+      for (const reply of ["yes, that's the wrong one, and I also got a summons", "yes, that's when I paid, I also got a 3 day notice"]) {
+        const r = await at(setup, reply);
+        assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end|shut off your water/i, `${setup[0]} → ${reply}`);
+      }
+      const ok = await at(setup, "yes, and I also got a summons");
+      assert.doesNotMatch(ok.say, /^(Okay\. |I still need|Just to check)/, setup[0]); assert.ok(ok.d.carry.includes("ask:a summons or court papers"), setup[0]);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle("yes, that's the wrong one, and I also got a summons");
+      assert.doesNotMatch(r.say, /deadline/i, entry); assert.deepEqual([d.date, d.carry], [null, ["ask:a summons or court papers"]], entry);
+    }
+    // The receipt words after a yes count only with a receipt verb; never "due", "paid" or a bare "that's the day".
+    for (const reply of ["yes, that's the day I got it", "yes, that's the day they gave it to me"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    for (const reply of ["yes, that's when I paid", "yes, that's the day"]) asked(await at(CHECKED, reply), reply);
+    // X19: a yes followed by plain receipt phrasing still counts; the due date still doesn't.
+    for (const reply of ["Yes, that's when I got it", "yes, that's when they handed it to me"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    asked(await at(CHECKED, "Yes, that is the due date"), "due at the check");
+    // X20: "handed it over", "dropped it off" are plain receipts.
+    for (const reply of ["They handed it over to me on September 3", "they dropped it off September 3"]) for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // X18: the caller's own sending isn't the day it reached them: the check; a receipt in the third person stays direct.
+    for (const reply of ["I sent the notice to my landlord on September 3", "I mailed it to the landlord September 3"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    for (const reply of ["they sent it September 3", "it was sent to me September 3", "the landlord mailed it September 3", "I was handed it on September 3"])
+      for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
     // Rule B / C: one row of every family, at the check too, is never counted from (the check or the date again).
     for (const reply of ["no, but I also got a summons", "September 3 is incorrect", "September 3, but that's wrong", "they left it on my door today", "I left it at home today",
       "September 3 was a mistake", "I'll pick it up on September 3", "I'm getting it September 3", "I hope to have it delivered today", "it should be delivered today",

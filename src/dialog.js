@@ -42,7 +42,7 @@ const DIRECT_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok"
   "dated", "i", "got", "received", "they", "served", "handed", "delivered", "posted", "mailed", "gave", "me", "to", "landlord", "my",
   "notice", "letter", "papers", "this", "that", "that's", "a", "an", "from", "for", "of", "with", "and", "by", "sent", "we", "our",
   "us", "you", "your", "here", "says", "say", "on", "in", "at", "be", "been", "came", "come", "were", "them", "him", "her",
-  "also", "just", "to", "plus"]);
+  "also", "just", "to", "plus", "over", "off", "dropped"]);
 // Letter-specific: "printed" / "mailing" only for a letter counted from its printed or mailing date (Social Security,
 // Medi-Cal, IRS, the Franchise Tax Board, EDD, a utility, parking); "due" only for the water bill, counted from its due
 // date. For a hand-over letter ("The date printed on the notice is September 3", "The notice is due September 3") they
@@ -58,6 +58,17 @@ const allowedWord = (letter) => {
 // and nothing more: "yes, that's the wrong one", "yes, that is the due date", "yes, I guess", "yes, about then" aren't.
 const YES_REST = new Set(["yes", "yeah", "yep", "yup", "sure", "correct", "right", "that's", "that", "is", "okay", "ok", "please", "thanks",
   "thank", "you", "bye", "goodbye", "it", "it's", "was", "indeed", "exactly", "uh", "um", "oh", "well"]);
+// …or plain receipt phrasing with a receipt verb in it ("yes, that's when I got it", "yes, that's the day they gave it to
+// me"); never "due", "paid" or "printed" ("yes, that's when I paid"), and nothing without a receipt verb ("yes, the date
+// on it" says which date, not that the held one is right).
+const RECEIPT_VERB = /\b(?:got|received|handed|gave|served|delivered|posted|mailed|came|dropped)\b/i;
+const yesRemainderOk = (words) => {
+  const receipt = words.some(w => RECEIPT_VERB.test(w));
+  return words.every(w => YES_REST.has(w) || (receipt && (DIRECT_WORDS.has(w) || w === "when" || w === "day")));
+};
+// The caller's own sending ("I sent the notice to my landlord on September 3") isn't the day it reached them: the check.
+// (Not a receipt said in the passive: "I was handed eviction papers", "we got it sent".)
+const SELF_SENT = /\b(?:i|we)\s+(?:(?!was\b|were\b|got\b|been\b|have\b|had\b|am\b|are\b)\w+\s+)?(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
 const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
 /** The words of `t` other than the given spans and relative days (lowercase, punctuation dropped). */
@@ -70,12 +81,14 @@ const LETTER_WORDS = (ids) => new Set(ids.map(id => RULES.find(r => r.id === id)
 // Every word of the turn is read: nothing before the date's clause is dropped ("Maybe, I got a 3 day notice on
 // September 3" has a hedge in it). A relative day is kept as a word unless it is the date being tested
 // ("It was September 3 and yesterday" has a second date in it).
-const otherWords = (t, spans = [], naming = null, dropRelative = false) => {
+const otherWords = (t, spans = [], naming = null, dropRelative = false, onlyNamed = false) => {
   let rest = t; for (const c of [...spans].sort((a, b) => b.start - a.start)) rest = rest.slice(0, c.start) + " " + rest.slice(c.end);
   // A "?" is never filler ("September 3?"); a stay request isn't chat ("hold on, it was September 25").
   rest = rest.replace(/\?/g, " ? ").replace(STAY_ALL, " ");
   if (dropRelative) rest = rest.replace(new RegExp(`\\b(?:${RELATIVE_DAY})\\b`, "gi"), " ");
-  if (naming) for (const r of RULES) for (const re of r.detect ?? []) rest = rest.replace(new RegExp(`[\\w']*(?:${re.source})[\\w']*`, "gi"), " ");
+  // (Only the named letters' own phrases with onlyNamed: at the check, "due date" is no letter's name.)
+  const named = onlyNamed && naming ? new Set(naming.flatMap(id => CARRIED_ASKS.get(id)?.candidates ?? [id])) : null;
+  if (naming) for (const r of RULES) if (!named || named.has(r.id)) for (const re of r.detect ?? []) rest = rest.replace(new RegExp(`[\\w']*(?:${re.source})[\\w']*`, "gi"), " ");
   const own = naming ? LETTER_WORDS(naming) : new Set();
   return rest.toLowerCase().replace(/[^a-z'? ]+/g, " ").split(/\s+/).filter(w => w && !own.has(w));
 };
@@ -244,15 +257,21 @@ export class Dialog {
       const said = dateCandidates(t);
       // A yes that says the held date again and nothing else ("yes, it was September 3") is a plain yes.
       const restated = said.length > 0 && said.every(c => !c.hard && !c.soft && sameDay(this.date, c))
-        && otherWords(t, said).every(w => YES_REST.has(w));
+        && yesRemainderOk(otherWords(t, said));
       const newDay = (said.length > 0 && !restated) || RELATIVE.test(t);
       this.held = this.date;   // the date that was held, for a chatty restatement of it (asked once, then the date again)
       // A stay request and nothing else ("please don't hang up"): the check again, the date still held.
       if (!named && STAY.test(t) && !/\w/.test(u0)) return this.say(`Okay. ${await this.confirmQuestion()}`);
       // A plain yes: nothing but yes words, thanks or a goodbye besides ("yes, that is the due date", "yes, the date on it"
       // aren't: the date is asked again).
-      const plainYes = YES.test(u0) && !NOT_A_YES.test(u0) && !newDay && (named || otherWords(t, said).every(w => YES_REST.has(w)));
-      if (plainYes) { if (named) await this.carryNamed(t); return this.answer(t); }
+      if (YES.test(u0) && !NOT_A_YES.test(u0) && !newDay) {
+        // A letter named with the yes: its words are the letter's; the rest must still be a plain yes.
+        const ids = named ? await this.namedIds(t) : [];
+        if (yesRemainderOk(otherWords(t, said, ids.length ? ids : null, false, true))) { if (named) this.addCarry(ids); return this.answer(t); }
+        // Not a plain yes, with a letter named ("Yes, that is the due date. I also got a 30 day notice."): the date is
+        // asked again and the letter carried.
+        if (named) { this.date = null; this.addCarry(ids); this.dateNo = true; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
+      }
       this.date = null;
       // A no, a negation or a hedge with no new day in it: the date again (a goodbye said outright still ends the call).
       if (!named && NOT_A_YES.test(u0) && !newDay && !FAREWELL.test(u0)) { this.dateNo = true; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
@@ -481,15 +500,18 @@ export class Dialog {
   }
 
   /** The letters a turn names (a letter, a which-kind question, or one also mentioned), added to the carry. */
-  async carryNamed(t) {
-    let det; try { det = await this.call("detect_letter", this.args({ text: t })); } catch { return; }
-    if (!det) return;
+  async carryNamed(t) { this.addCarry(await this.namedIds(t)); }
+  addCarry(ids) { this.carry = [...new Set([...this.carry, ...ids.filter(c => !c.startsWith("ask:") || CARRIED_ASKS.has(c))])].filter(c => c !== this.letter).slice(0, 3); }
+  async namedIds(t) {
+    let det; try { det = await this.call("detect_letter", this.args({ text: t })); } catch { return []; }
+    if (!det) return [];
     const ids = [...(det.also_detected ?? []), ...(det.also_asks ?? []).map(a => `ask:${a.label}`)];
     if (det.recognized && det.letter_type !== this.letter) ids.unshift(det.letter_type);
     const group = det.candidates?.length && AMBIGUOUS.find(g => g.label && g.candidates.length === det.candidates.length && g.candidates.every(c => det.candidates.includes(c)));
     if (group) ids.unshift(`ask:${group.label}`);
-    this.carry = [...new Set([...this.carry, ...ids.filter(c => !c.startsWith("ask:") || CARRIED_ASKS.has(c))])].filter(c => c !== this.letter).slice(0, 3);
+    return ids;
   }
+
 
   /** Read a date back before counting from it, holding it (awaiting the date, with the date set). */
   async confirm(iso) {
@@ -537,17 +559,17 @@ export class Dialog {
       if (!date) return { kind: "unread" };
       // Direct only with one date and nothing but filler or receipt phrasing besides; else the check.
       const direct = cands.length === 1 && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
-      return { kind: direct ? "date" : "confirm", date };
+      return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
     }
     if (RELATIVE.test(t) && (NEGATION.test(t) || FUTURE.test(t))) return { kind: "never" };
     if (!iso) return { kind: "none" };
     const ok = allowedWord(det?.letter_type ?? this.letter);
-    if (!RELATIVE.test(t)) return { kind: otherWords(t, [], naming).every(ok) ? "date" : "confirm", date: iso };   // a date read only by the decoder
+    if (!RELATIVE.test(t)) return { kind: otherWords(t, [], naming).every(ok) && !SELF_SENT.test(t) ? "date" : "confirm", date: iso };   // a date read only by the decoder
     // One relative day, and nothing else but filler or receipt phrasing.
     const days = t.match(new RegExp(`\\b(?:${RELATIVE_DAY})\\b`, "gi")) ?? [];
     const words = otherWords(t, [], naming, true);
     const bare = days.length === 1 && (TODAYISH.test(t) ? words.every(w => BARE_WORDS.has(w)) : words.every(ok));
-    return { kind: bare ? "date" : "confirm", date: iso };
+    return { kind: bare && !SELF_SENT.test(t) ? "date" : "confirm", date: iso };
   }
 
   async letterInfo(id) {
