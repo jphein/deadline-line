@@ -508,6 +508,20 @@ test("dialog: a validation notice's 'If you receive a summons' line gets the val
   } finally { await mcp.close(); }
 });
 
+test("dialog: 'may have been served already' is asked about: court papers get the summons answer, a letter the validation answer", async () => {
+  const mcp = await startMcp();
+  try {
+    for (const [answer, want] of [["court papers", "ca-civil-summons"], ["a letter", "debt-validation"]]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      const q = await d.handle("The debt collector says you may have been served already with a lawsuit.");
+      assert.equal(q.say, "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?");
+      assert.equal(d.letter, null);
+      await d.handle(answer);
+      assert.equal(d.letter, want, answer);
+    }
+  } finally { await mcp.close(); }
+});
+
 test("dialog: restore() takes the HOA flag only as a real true (a tampered snapshot doesn't bring the step)", async () => {
   const mcp = await startMcp();
   try {
