@@ -489,6 +489,19 @@ test("dialog: a validation notice with the CFPB complaint line gets the validati
   } finally { await mcp.close(); }
 });
 
+test("dialog: a validation notice's 'If you receive a summons' line gets the validation answer; a real summons still gets the summons answer", async () => {
+  const mcp = await startMcp();
+  try {
+    const notice = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await notice.handle("Example Collections LLC is a debt collector. We are trying to collect a debt that you owe to Example Bank. " +
+      "Call or write to us by October 30, 2026, to dispute all or part of the debt. If you receive a summons, do not ignore it.");
+    assert.equal(notice.letter, "debt-validation");
+    const summons = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await summons.handle("a debt collector sued me and I got a summons");
+    assert.equal(summons.letter, "ca-civil-summons");
+  } finally { await mcp.close(); }
+});
+
 test("dialog: restore() takes the HOA flag only as a real true (a tampered snapshot doesn't bring the step)", async () => {
   const mcp = await startMcp();
   try {
