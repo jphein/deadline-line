@@ -100,18 +100,38 @@ test("api/decode: a carrySpoken the page sends is never spoken; the carried lett
   }
 });
 
+test("api/decode: a 'last' or 'dateQuestion' the page sends is never spoken; the repeat and the re-prompt are the server's own", T, async () => {
+  const say = async (transcript, state) => (await (await decodeApi.POST(req("/api/decode", { body: { transcript, state, today: "2026-09-30" } }))).json()).say;
+  // "Say that again" after an answer: the answer, rebuilt, not the page's "last".
+  const repeat = await say("say that again", { awaiting: "another", letter: "ca-3day", date: "2026-09-28", last: "INJECTED LAST" });
+  assert.doesNotMatch(repeat, /INJECTED/); assert.match(repeat, /^Your deadline is Thursday, October 1, 2026\./);
+  // A re-prompt and a repeat at the date question: the letter's own date question.
+  for (const [transcript, want] of [["I don't know", /^I still need the date on the letter\. What date is on it\?/], ["what?", /^Got it: California: court papers for an eviction \(Summons, unlawful detainer\)\. What date is on it\?/]])
+    assert.match(await say(transcript, { awaiting: "date", letter: "ca-ud", dateQuestion: "INJECTED QUESTION", last: "INJECTED LAST" }), want, transcript);
+  assert.match(await say("I don't know", { awaiting: "date", letter: "ca-civil-summons", dateQuestion: "INJECTED QUESTION" }), /^I still need the date on the letter\. What day were the papers handed to you\?/);
+  // The normal repeat through the page is what the line said.
+  const turns = await converse(decodeApi.POST, ["I got a 3 day notice dated September 28", "say that again"], "2026-09-30");
+  assert.equal(turns[1].say, turns[0].say);
+  const counted = await converse(decodeApi.POST, ["I got a 3 day notice dated September 28", "yes", "say that again"], "2026-09-30");
+  assert.match(counted[1].say, /^Here's how I counted\./); assert.equal(counted[2].say, counted[1].say);
+  const asked = await converse(decodeApi.POST, ["I got a summons", "say that again"], "2026-09-30");
+  assert.equal(asked[1].say, asked[0].say);
+});
+
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
-    { letter: null, date: null, awaiting: null, last: undefined, candidates: ["jury-summons"], dateQuestion: null, hoa: false, hoaSaid: false, carry: [] });
+    { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [] });
   // Only a real boolean true survives as the HOA flag.
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoa: v }).hoa, want, String(v));
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoaSaid: v }).hoaSaid, want, String(v));
-  // The carried letters: real ids only, at most three; the spoken line only as a string, capped, and only with a carry.
+  // The carried letters: real ids only, at most three.
   assert.deepEqual(cleanState({ carry: ["ca-3day", "nope", "ca-3day", "ca-ud", "jury-summons", "ca-noa"] }).carry, ["ca-3day", "ca-ud", "jury-summons"]);
   assert.deepEqual(cleanState({ carry: "ca-3day" }).carry, []);
   // A carrySpoken in the state is dropped: the line about a carried letter is the server's own.
   assert.equal("carrySpoken" in cleanState({ carry: ["ca-civil-summons"], carrySpoken: "INJECTED TEXT" }), false);
-  assert.deepEqual(cleanState({ letter: "ssa-initial", date: "2026-09-13", awaiting: "more", last: "x".repeat(5000) }).last.length, 2000);
+  // No text from the page is kept: "last" and "dateQuestion" are rebuilt on the server.
+  const cleaned = cleanState({ letter: "ssa-initial", date: "2026-09-13", awaiting: "more", last: "INJECTED LAST", dateQuestion: "INJECTED QUESTION" });
+  assert.equal("last" in cleaned, false); assert.equal("dateQuestion" in cleaned, false);
   assert.deepEqual(cleanState("nope"), {});
   const r = await decodeApi.POST(req("/api/decode", { body: { transcript: "yes", state: { letter: "x", awaiting: "more", result: { how_we_counted_spoken: "lies" } }, today: TODAY } }));
   assert.equal(r.status, 200);

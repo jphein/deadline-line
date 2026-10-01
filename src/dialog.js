@@ -1,5 +1,7 @@
 // dialog.js — the conversation, written for the ear and for a phone keypad-less caller.
 // Every fact comes from Deadline Decoder MCP tools; this file only decides what to ask next.
+import { RULES, AMBIGUOUS } from "../vendor/deadline-decoder-mcp/src/rules/rules.js";
+import { UNKNOWN_LETTER } from "../vendor/deadline-decoder-mcp/src/decoder.js";
 
 const YES = /\b(yes|yeah|yep|sure|ok|okay|please|go ahead|that's right|correct|right)\b/i;
 const NO = /\b(no|nope|nah|not now|no thanks|that's wrong|wrong)\b/i;
@@ -64,15 +66,37 @@ export class Dialog {
       carry: this.carry };
   }
 
-  /** Pick a conversation back up from snapshot(). */
+  /** Pick a conversation back up from snapshot(). Nothing it says is taken from the snapshot: the date question and
+   *  the line to repeat are rebuilt here from the letter and where the conversation stands (the page could send any
+   *  text back as "last" or "dateQuestion"). */
   static async restore(callTool, snap = {}, opts = {}) {
     const dialog = new Dialog(callTool, opts);
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
-    dialog.awaiting = snap.awaiting ?? null; dialog.last = snap.last ?? GREETING;
-    dialog.candidates = snap.candidates ?? []; dialog.dateQuestion = snap.dateQuestion ?? null; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
+    dialog.awaiting = snap.awaiting ?? null;
+    dialog.candidates = snap.candidates ?? []; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
     dialog.carry = snap.carry ?? [];
-    if (dialog.awaiting === "more") await dialog.compute();   // "how did you count?" reads the deadline
+    dialog.dateQuestion = RULES.find(r => r.id === dialog.letter)?.dateQuestion ?? null;
+    if (dialog.awaiting === "more" || dialog.awaiting === "text") await dialog.compute();   // "how did you count?" reads the deadline
+    dialog.last = await dialog.lastSaid();
     return dialog;
+  }
+
+  /** What the line last said, rebuilt from where the conversation stands (for "say that again"). */
+  async lastSaid() {
+    const { awaiting, letter } = this;
+    if (awaiting === "date" && letter) return `Got it: ${RULES.find(r => r.id === letter).title}. ${this.dateQuestion ?? ASK_DATE}`;
+    if (awaiting === "letter") {
+      const group = AMBIGUOUS.find(g => g.candidates.length === this.candidates.length && g.candidates.every(c => this.candidates.includes(c)));
+      if (this.candidates.length && group) return group.question;
+      return this.date ? `Got the date. ${UNKNOWN_LETTER}` : `${UNKNOWN_LETTER} And what date is on it?`;
+    }
+    if (awaiting === "text" && this.result) return `Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`;
+    if ((awaiting === "more" || awaiting === "another") && letter) {
+      // The answer again, from a copy (answering changes what's carried and said once).
+      const copy = Object.assign(new Dialog(this.call, { today: this.today }), { letter, date: this.date, carry: [...this.carry] });
+      return (await copy.answer()).say;
+    }
+    return GREETING;
   }
 
   async handle(text) {
