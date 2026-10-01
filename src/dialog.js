@@ -20,9 +20,13 @@ const HOA_CASED = /\b(HOA|hoa|H O A)\b/;
 // ASR sometimes title-cases a spoken "hoa" that opens a sentence ("Hoa sent me the Notice of Default."): only there,
 // and only as the one sending the notice itself or foreclosing, so the name still isn't an HOA: "Hoa is my name",
 // "Hoa sent me a text about…", "Hoa sent me my bank's notice…", "Hoa filed my papers…".
-const HOA_INITIAL = /(^|[.!?]\s+)Hoa ((sent|mailed|gave|filed)( me| us)?( an?| the)? ([Nn]otice|[Ll]etter|[Ll]ien)\b|is (foreclosing|selling|auctioning)\b)/;
-// A lender named in the same turn beats the title-cased "Hoa" (it may be a name); a real "HOA" still wins.
-const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) || (HOA_INITIAL.test(t) && !LENDER.test(t)) };
+const HOA_INITIAL_SENT = /(^|[.!?]\s+)Hoa (sent|mailed|gave|filed)( me| us)?( an?| the)? ([Nn]otice|[Ll]etter|[Ll]ien)\b/;
+const HOA_INITIAL_FORECLOSING = /(^|[.!?]\s+)Hoa is (foreclosing|selling|auctioning)\b/;
+// A lender that sent the notice ("my bank's notice of default", "from my mortgage lender") beats a title-cased "Hoa"
+// that sent one (it may be a person passing it on); a lender only mentioned ("My mortgage is fine.") doesn't, and
+// nothing beats "Hoa is foreclosing" or a real "HOA".
+const LENDER_SENT = /\b((my |the )?(bank|lender|mortgage|servicer|credit union)('s)? (notice|letter)|from (my |the )?(bank|lender|mortgage( company| lender)?|loan servicer|servicer|credit union))\b/i;
+const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) || HOA_INITIAL_FORECLOSING.test(t) || (HOA_INITIAL_SENT.test(t) && !LENDER_SENT.test(t)) };
 // The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
 const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
