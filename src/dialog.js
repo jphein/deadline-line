@@ -33,6 +33,8 @@ const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
 const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
+// "a Notice of Default" → "the Notice of Default"; "small claims court papers" → "the small claims court papers".
+const theLetter = (name) => /^the /i.test(name) ? name : `the ${name.replace(/^an? /i, "")}`;
 const STOP_OFFER = "If you find the date, call back right away: some of these run out in days. Do you want to stop here?";
 // A carried question ("…, I also got a summons": eviction, lawsuit or jury?) is kept as "ask:<its group's label>"; the
 // question and its candidates are the rules' own, looked up here, never taken from the state the page sends back.
@@ -164,7 +166,8 @@ export class Dialog {
       // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
       if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !named) {
         if (YES.test(t)) return this.startCarry("");
-        if (NO.test(t)) return this.goodbye(`Act by the date printed on ${(await this.letterInfo(carry[0])).short.replace(/^an? /, "the ")}, and call back any time about it. `);
+        // No date to count from, so no "act by" date (a Notice of Default's printed date is already past; a sale's is too late).
+        if (NO.test(t)) return this.goodbye(`Don't put off ${theLetter((await this.letterInfo(carry[0])).short)}: call back any time about it, or get free legal help. `);
       }
       if (!carry.length && NO.test(t) && !named) return this.goodbye();
       this.reset();

@@ -604,7 +604,14 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     assert.doesNotMatch(go[1].say, /What date is on it|What day/);   // "yes" answers it, no date asked
     const stop = await run(["I got a jury summons, plus a notice of default", "no"]);
     assert.equal(stop[1].done, true);
-    assert.equal(stop[1].say, "Okay. Act by the date printed on the Notice of Default, and call back any time about it. This is general information, not legal advice. Goodbye.");
+    // No "act by" date for a letter with no date to count from (a Notice of Default's printed date is already past, a
+    // sale's is too late): don't put it off.
+    assert.equal(stop[1].say, "Okay. Don't put off the Notice of Default: call back any time about it, or get free legal help. This is general information, not legal advice. Goodbye.");
+    for (const [id, name] of [["ca-foreclosure-sale", "the Notice of Trustee's Sale"], ["ca-small-claims", "the small claims court papers"]]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      Object.assign(d, { letter: "jury-summons", awaiting: "another", carry: [id] });
+      assert.equal((await d.handle("no")).say, `Okay. Don't put off ${name}: call back any time about it, or get free legal help. This is general information, not legal advice. Goodbye.`, id);
+    }
     // A carried question: with nothing to count first, it's asked at once; after a counted answer, where the carried
     // letter would come in; "no" twice at the date question goes on to it too.
     const asked = await run(["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"]);
