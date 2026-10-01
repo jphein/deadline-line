@@ -1,10 +1,10 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ c4cf46243861800b12d9d6c7fc30ea5ec5feb6a3), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 35d0ebfe2197041295f2ad729826c733fe295c14), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // decoder.js — the domain layer the MCP tools call. Pure functions over the cited rules in src/rules/
 // (which began as Deadline Decoder's and have grown since). No I/O here, so every answer is testable.
 import { d, iso, addDays, daysBetween, fmt, findDates } from "./rules/dates.js";
-import { RULES, SPOKEN_ORDER, AMBIGUOUS, detect } from "./rules/rules.js";
+import { RULES, SPOKEN_ORDER, AMBIGUOUS, detect, textFor } from "./rules/rules.js";
 
 export { KEYTERMS } from "./rules/rules.js";
 
@@ -156,7 +156,11 @@ export function findSpokenDates(text, today = todayIso(), { pastDue = false } = 
 // SPOKEN_ORDER (most specific first). Used when the printed-letter detector finds nothing, or to hear "denied again".
 function detectSpoken(text) {
   // A rule's `not` (the letters it must never claim) applies to what people say, too.
-  for (const id of SPOKEN_ORDER) { const r = RULES.find(x => x.id === id); if ((r?.spoken?.test(text) || r?.spokenCase?.test(text)) && !r.not?.test(text)) return r; }
+  for (const id of SPOKEN_ORDER) {
+    const r = RULES.find(x => x.id === id); if (!r) continue;
+    const t = textFor(r, text);
+    if ((r.spoken?.test(t) || r.spokenCase?.test(t)) && !r.not?.test(t)) return r;
+  }
   return null;
 }
 

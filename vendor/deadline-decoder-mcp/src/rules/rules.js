@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ c4cf46243861800b12d9d6c7fc30ea5ec5feb6a3), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ 35d0ebfe2197041295f2ad729826c733fe295c14), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -91,7 +91,8 @@ function alsoDates(list = [], anchor) {
  *  prints its own date and there is nothing to count), count, headline, steps, help, sources, detect, spoken,
  *  answers, keyterms. Optional: confidence ("SOLID", or "HEDGE" plus a `hedge` sentence), dateLabel,
  *  dateQuestion, mailWho, not (printed cues that rule it out), also (see alsoDates), note (a last counting step),
- *  lead (the answer's first sentence, with {date}, for a notice that sets the earliest date something can happen). */
+ *  lead (the answer's first sentence, with {date}, for a notice that sets the earliest date something can happen),
+ *  unhedge (true: the rule reads the text through unhedged(), for "is this a suit?"). */
 export function spec(s) {
   return {
     confidence: "SOLID", ...s,
@@ -277,9 +278,10 @@ export const RULES = [
     dateQuestion: "What day were the papers handed to you? You can say something like September 13th.",
     count: { days: 30, unit: "calendar", roll: "court" },
     must: /\bsummons\b|citaci[oó]n judicial/i,
+    unhedge: true,              // nor is it a summons
     detect: [/\bsummons\b|citaci[oó]n judicial/i, /\b(complaint|plaintiff|demandante)\b/i, /\b(30|thirty) (calendar )?days\b/i],
     not: /unlawful detainer|eviction|desalojo/i,
-    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b/i,
+    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b/i,
     answers: /\b(money|debt|owe|lawsuit|sued|suing|collect\w*|credit card|loan|bill)\b/i,
     keyterms: ["summons", "complaint", "lawsuit", "debt collector"],
     headline: "File a written response with the court",
@@ -820,6 +822,7 @@ export const RULES = [
     count: null,
     hedge: "A debt collector's validation notice prints a date to dispute the debt by. Dispute in writing by that date if you can. If the notice reached you late, you may have until 30 days after you got it.",
     must: /debt collect\w*|collection agency|collector|validation notice|\bcollections?\b/i,
+    unhedge: true,              // "If you receive a summons, do not ignore it." isn't a suit
     // Not a lawsuit (court papers have their own deadline), and not a government agency collecting its own debt
     // (the IRS, FTB, EDD, Social Security, child support, a county or court): the validation rules cover debt collectors.
     // An actual suit (being sued, papers, a summons), not the boilerplate a validation notice carries ("if you are sued",
@@ -1165,12 +1168,32 @@ export const AMBIGUOUS = [
 // Every word the recognizer should expect, from every rule (for speech-to-text key-term prompting).
 export const KEYTERMS = [...new Set(RULES.flatMap(r => r.keyterms ?? []))];
 
+// A notice's own hypotheticals and denials aren't a suit: "If you receive a summons, do not ignore it.", "If you do not
+// pay, you may be served with a lawsuit.", "We have not filed a lawsuit against you." For the rules that ask "is this a
+// suit?", the hedged phrase is blanked: from a hedge word within 20 characters before a suit word ("no" only right
+// before it: "no lawsuit has been filed", not "no idea what this summons means"), through at most three more words
+// of that phrase ("with a lawsuit", "against you"). The phrase stops at and/but/was/were/has/have/yesterday and at a
+// new suit noun that no preposition ties to it, so a real suit after the hypothetical stays: "…you may be served with
+// a lawsuit you got a summons yesterday…", "…WITH A LAWSUIT A SUMMONS AND COMPLAINT WAS FILED…". Never in a sentence
+// in the caller's own words ("I don't know if the summons is real"): notices say "you" and "we", callers say "I".
+// ("before" isn't a hedge: "Before you were served with this summons, …" is a real one.)
+const SUIT = "summons|complaint|lawsuit|court papers|suit|sued?|suing|served";
+const DET = "(?:(?:a|an|the|this|any)\\s+)?";
+const PHRASE_WORD = `\\s+(?:(?:with|of|against|to)\\s+${DET}\\w+|(?!(?:and|but|yesterday|was|were|has|have)\\b)${DET}(?!(?:${SUIT})\\b)\\w+)`;
+const HEDGE_SUIT = new RegExp(`(?:\\b(?:if|may|might|could|would|not|never|unless)\\b[^.;!?,]{0,20}?|\\bno (?:\\w+ )?)\\b(?:${SUIT})\\b(?:${PHRASE_WORD}){0,3}`, "gi");
+const FIRST_PERSON = /\b(I|me|my|I'm|I've)\b/i;
+export function unhedged(text) {
+  return text.replace(/[^.;!?]+/g, (sentence) => FIRST_PERSON.test(sentence) ? sentence : sentence.replace(HEDGE_SUIT, " "));
+}
+export const textFor = (r, text) => r.unhedge ? unhedged(text) : text;
+
 export function detect(text) {
   if (!text || text.trim().length < 20) return null;
   let best = null, bestScore = 0;
   for (const r of RULES) {
-    if ((r.must && !r.must.test(text)) || (r.not && r.not.test(text))) continue;
-    const score = r.detect.reduce((n, re) => n + (re.test(text) ? 1 : 0), 0);
+    const t = textFor(r, text);
+    if ((r.must && !r.must.test(t)) || (r.not && r.not.test(t))) continue;
+    const score = r.detect.reduce((n, re) => n + (re.test(t) ? 1 : 0), 0);
     // "reconsideration" appears in both SSA letters: a reconsideration DETERMINATION offers a hearing.
     // Only between the two SSA letters: without "reconsideration", a hearing offer (the DMV's, a county's) isn't SSA's.
     const bonus = r.id === "ssa-recon" && /reconsideration/i.test(text) && /(request (for )?(a )?hearing|administrative law judge)/i.test(text) ? 2 : 0;
