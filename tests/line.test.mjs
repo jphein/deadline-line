@@ -601,6 +601,7 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     const go = await run(["I got a jury summons, plus a notice of default", "yes"]);
     assert.match(go[0].say, /tell me about that next\. Want me to go on to it\?$/); assert.doesNotMatch(go[0].say, /What date is on it/);
     assert.equal(go[1].letter, "ca-foreclosure-nod"); assert.match(go[1].say, /^A Notice of Default starts the foreclosure clock/);
+    assert.doesNotMatch(go[1].say, /What date is on it|What day/);   // "yes" answers it, no date asked
     const stop = await run(["I got a jury summons, plus a notice of default", "no"]);
     assert.equal(stop[1].done, true);
     // A carried question: with nothing to count first, it's asked at once; after a counted answer, where the carried
@@ -635,6 +636,13 @@ test("dialog: 'no' twice to the date question offers to stop, or goes on to a le
     // One "no", then the date: no stop offer.
     const once = await run(["I got a 3 day notice", "no", "September 28"]);
     assert.match(once[2].say, /^Your deadline is/);
+    // The once-said "no" lasts one turn: a goodbye, or another letter, clears it (a later "no" starts over).
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await d.handle("I got a 3 day notice"); await d.handle("no"); assert.equal(d.dateNo, true);
+    await d.handle("actually it's a 30 day notice"); assert.equal(d.dateNo, false);
+    assert.match((await d.handle("no")).say, /^I still need the date on the letter\./);
+    const bye = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await bye.handle("I got a 3 day notice"); await bye.handle("no"); await bye.handle("goodbye"); assert.equal(bye.dateNo, false);
   } finally { await mcp.close(); }
 });
 
