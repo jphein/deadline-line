@@ -11,7 +11,7 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 // again" (after "can/could/would/will you" or "please"), "again, please",
 // "what did you say", "sorry, what?", or a bare "again", "huh" or "what". "They denied me again" isn't one.
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
-// One list of goodbye and thanks words: the goodbye check and the date read-back (CONFIRM_MARKER) both use it.
+// One list of goodbye and thanks words.
 const BYE_WORDS = "bye|goodbye|that's all|that is all|hang up|thank you|thanks";
 const BYE = new RegExp(`\\b(${BYE_WORDS})\\b`, "i");
 // A no that ends in a yes ("no, okay go ahead", "no wait, yes"): the caller corrected themselves, and the yes wins.
@@ -26,28 +26,45 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 const MONTH = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
 const RELATIVE_DAY = "today|tonight|yesterday|tomorrow|this (?:morning|afternoon|evening|week)|last night|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday";
 const ORD = "(?:st|nd|rd|th)?";
-const DATE_CANDIDATE = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2})${ORD}\\b|\\b(\\d{1,2})${ORD}\\s+(?:of\\s+)?(${MONTH})\\b|\\b(\\d{1,2})/(\\d{1,2})(?:/\\d{2,4})?\\b|\\bthe\\s+(\\d{1,2})(?:st|nd|rd|th)\\b|\\b\\d{4}-(\\d{1,2})-(\\d{1,2})\\b`, "gi");
+const DATE_CANDIDATE = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2})${ORD}\\b|\\b(?:the\\s+)?(\\d{1,2})${ORD}\\s+(?:of\\s+)?(${MONTH})\\b|\\b(\\d{1,2})/(\\d{1,2})(?:/\\d{2,4})?\\b|\\bthe\\s+(\\d{1,2})(?:st|nd|rd|th)\\b|\\b\\d{4}-(\\d{1,2})-(\\d{1,2})\\b`, "gi");
 // A date taken back outright ("not September 3", "September 3? no", "September 3 isn't the date"), or with a "-n't"
 // right before it ("it wasn't September 3": with no other date said, that one is read back to check).
 const HARD_BEFORE = /\bnot\s+(?:on\s+)?$/i, SOFT_BEFORE = /\b\w+n't\s+(?:on\s+)?$/i;
-const HARD_AFTER = /^\s*(?:(?:isn'?t|is not|wasn'?t|was not)\s+(?:the\s+)?(?:date|it|right|correct)\b|(?:is|was)\s+wrong\b|\?\s*(?:no|nope|nah)\b)/i;
+const HARD_AFTER = /^\s*(?:(?:isn'?t|is not|wasn'?t|was not)\s+(?:the\s+)?(?:date|it|right|correct)\b|(?:is|was)\s+(?:a\s+)?(?:mistake|wrong|incorrect)\b|\?\s*(?:no|nope|nah)\b)/i;
 // The turn's date denied as a whole: "that's not it", "not the date", the other letter's date ("no wait, that's the other
 // letter"; which letter it belongs to is left for later).
 const DENIED_TURN = /\bthat'?s not (?:it|the date|right(?!\s+now))\b|\b(?:it'?s |that'?s |no,? )?not the date\b|\b(?:for|from|on|that'?s|it'?s|that was|it was) the other letter\b|\bwrong letter\b/i;
-// Said with a date, any of these means the date is read back before anything is counted from it: a negation, a hedge,
-// a thanks or goodbye word (a caller leaving with an unchecked date is the worst case), or a self-correction.
-const HEDGE = "maybe|perhaps|i think|might|probably|not sure";
-// ("September 3 or 4" is a hedge too.)
-const CONFIRM_MARKER = new RegExp(`n't\\b|\\b(?:not|never|${HEDGE}|${BYE_WORDS}|no wait)\\b|\\bor\\s+(?:the\\s+)?\\d{1,2}(?:st|nd|rd|th)?\\b|\\?\\s*$`, "i");
-const HEDGE_OR_BYE = new RegExp(`\\b(?:${HEDGE}|${BYE_WORDS})\\b|\\?\\s*$`, "i");
-const HEDGED = new RegExp(`\\b(?:${HEDGE})\\b|\\?\\s*$`, "i");
-// A relative day counts as the date only with a past receipt ("I got it yesterday", "it was served today") or said on
-// its own ("yesterday", "it was today"); a plan or anything else ("I'm picking it up today") isn't the notice's date.
-const RECEIPT = /\b(?:got|gotten|came|received|served|handed|posted|mailed|taped|gave|delivered|arrived|found|saw|left)\b/i;
-const BARE_FILLER = /\b(?:it|it'?s|was|is|on|that|that'?s|the|um|uh|so|just|well|actually|yes|yeah|okay|ok|i|think)\b/gi;
+// A date counts directly only when nothing else is said with it but filler or plain receipt phrasing ("September 3",
+// "it was September 3", "I got it on September 3", "the landlord gave it to me on September 3"); anything else said with
+// a date (a no, a hedge, a plan, thanks, a goodbye, a second date, chat) sends it to the check. One whitelist, so a new
+// way of hedging or denying can't slip through a word list.
+const DIRECT_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "the", "it", "its", "it's", "was", "is", "on", "date",
+  "dated", "i", "got", "received", "they", "served", "handed", "delivered", "posted", "mailed", "gave", "me", "to", "landlord", "my",
+  "notice", "letter", "papers", "this", "that", "that's", "a", "an", "from", "for", "of", "with", "and", "by", "sent", "we", "our",
+  "us", "you", "your", "here", "says", "say", "printed", "on", "in", "at", "be", "been", "came", "come", "were", "them", "him", "her",
+  "also", "just", "to", "plus", "due"]);
+// A relative day counts directly only bare: "yesterday", "it was yesterday", "I got it yesterday"; "today" (tonight, this
+// morning ...) only with nothing but filler ("today", "it was today").
+const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
+const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
+/** The words of `t` other than the given spans and relative days (lowercase, punctuation dropped). */
+// On the turn that names the letter ("My second Social Security denial is dated September 13", "I got a 3 day notice
+// dated September 28, I also got a 60 day notice to move out"), the words naming letters (any rule's detect phrases, and
+// the named letters' titles and keyterms) are the letters, not chat, and only the clause with the date, to the end of the
+// turn, is read. Every other turn (an answer to a date question) is read whole.
+const LETTER_WORDS = (ids) => new Set(ids.map(id => RULES.find(r => r.id === id)).filter(Boolean)
+  .flatMap(r => [r.title, r.carryTitle ?? "", ...(r.keyterms ?? [])]).join(" ").toLowerCase().replace(/[^a-z' ]+/g, " ").split(/\s+/).filter(Boolean));
+const otherWords = (t, spans = [], naming = null) => {
+  let rest = t; for (const c of [...spans].sort((a, b) => b.start - a.start)) rest = rest.slice(0, c.start) + " \u0000 " + rest.slice(c.end);
+  if (naming && rest.includes("\u0000")) { const at = rest.indexOf("\u0000"); rest = rest.slice(Math.max(...[",", ".", ";", "!", "?"].map(p => rest.lastIndexOf(p, at))) + 1); }
+  // A "?" is never filler ("September 3?"); a stay request isn't chat ("hold on, it was September 25").
+  rest = rest.replace(/\?/g, " ? ").replace(STAY_ALL, " ").replace(/\u0000/g, " ").replace(new RegExp(`\\b(?:${RELATIVE_DAY})\\b`, "gi"), " ");
+  if (naming) for (const r of RULES) for (const re of r.detect ?? []) rest = rest.replace(new RegExp(`[\\w']*(?:${re.source})[\\w']*`, "gi"), " ");
+  const own = naming ? LETTER_WORDS(naming) : new Set();
+  return rest.toLowerCase().replace(/[^a-z'? ]+/g, " ").split(/\s+/).filter(w => w && !own.has(w));
+};
 // A relative day said with a no, a "not", or a plan ("I'll look for it today", "I'll call back tomorrow") is never the date.
 const RELATIVE = new RegExp(`\\b(?:${RELATIVE_DAY})\\b`, "i");
-const NOT_RELATIVE = new RegExp(`\\bnot\\s+(?:${RELATIVE_DAY})\\b`, "gi");
 const NEGATION = /\b(no|nope|nah|not|never)\b|n't\b/i;
 const FUTURE = /\b(?:i'?ll|we'?ll|will|going to|gonna|later|call back|get back|look for|find|check|plan|planning|collect|pick(?:ing)? (?:it )?up)\b/i;
 // At the check, a yes is a plain one: no negation, no hedge (maybe, perhaps, probably, might, not sure), no trailing "?"
@@ -183,7 +200,7 @@ export class Dialog {
   }
 
   async handle(text) {
-    this.declinedDated = false;
+    this.declinedDated = false; this.held = null;
     const t = (text || "").trim().replace(/[\u2018\u2019]/g, "'");   // ASR's curly apostrophes (U+2018, U+2019) as plain ones
     // "Don't hang up": this turn doesn't end the call (end()). What was open is kept, to be asked again.
     const unsaid = STAY.test(t) ? t.replace(STAY_ALL, " ") : t;   // the reply without "please don't hang up"
@@ -200,18 +217,26 @@ export class Dialog {
     const named = (YES.test(t) || NO.test(t) || BYE.test(t)) && await this.namesLetter(t, current);
     // A date read back to check ("Just to check: is the date on … September 3?", awaiting the date with the date held):
     // "yes" counts from it, "no" asks the date again, anything else is read as a new answer to the date question.
-    if (this.awaiting === "date" && this.date && !named) {
+    // Never counted from without a plain yes: a letter named here ("no, but I also got a summons") clears the held date and
+    // is taken as at the date question; with a plain yes ("yes, and I also got a summons") the date counts and the letter
+    // is carried.
+    if (this.awaiting === "date" && this.date) {
       const u0 = STAY.test(t) ? t.replace(STAY_ALL, " ") : t;
       // "yes, bye" counts too: the caller hears the deadline before going. Not a yes with a new day in it ("yes, actually
       // it was yesterday": read as the new date), nor a negated or hedged one ("I'm not sure", "that's not right",
       // "right?", "yes, maybe": the date is asked again).
-      const newDay = dateCandidates(t).length > 0 || RELATIVE.test(t);
+      const said = dateCandidates(t);
+      // A yes that says the held date again and nothing else ("yes, it was September 3") is a plain yes.
+      const restated = said.length > 0 && said.every(c => !c.hard && !c.soft && sameDay(this.date, c))
+        && otherWords(t, said).every(w => DIRECT_WORDS.has(w) || ["yes", "yeah", "yep", "correct", "right"].includes(w));
+      const newDay = (said.length > 0 && !restated) || RELATIVE.test(t);
+      this.held = this.date;   // the date that was held, for a chatty restatement of it (asked once, then the date again)
       // A stay request and nothing else ("please don't hang up"): the check again, the date still held.
-      if (STAY.test(t) && !/\w/.test(u0)) return this.say(`Okay. ${await this.confirmQuestion()}`);
-      if (YES.test(u0) && !NOT_A_YES.test(u0) && !newDay) return this.answer(t);
+      if (!named && STAY.test(t) && !/\w/.test(u0)) return this.say(`Okay. ${await this.confirmQuestion()}`);
+      if (YES.test(u0) && !NOT_A_YES.test(u0) && !newDay) { if (named) await this.carryNamed(t); return this.answer(t); }
       this.date = null;
       // A no, a negation or a hedge with no new day in it: the date again (a goodbye said outright still ends the call).
-      if (NOT_A_YES.test(u0) && !newDay && !FAREWELL.test(u0)) { this.dateNo = true; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
+      if (!named && NOT_A_YES.test(u0) && !newDay && !FAREWELL.test(u0)) { this.dateNo = true; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
     }
     // "No" to the date question twice: go on to a letter the caller also named, or offer to stop, not the same ask again.
     const saidNo = this.dateNo; this.dateNo = false;
@@ -248,7 +273,9 @@ export class Dialog {
     // After an answer, an explicit date is a correction ("September 3, thanks", "actually it was September 3"): it is read
     // like an answer to the date question, not as a yes, no or goodbye to the offer.
     const correction = (this.awaiting === "more" || this.awaiting === "text") && !named
-      && (dateCandidates(t).some(c => !c.hard) || (RELATIVE.test(t) && ["date", "confirm"].includes(await this.saysDate(t))));   // not one only taken back
+      && (dateCandidates(t).some(c => !c.hard || !NO.test(t)) || (RELATIVE.test(t) && ["date", "confirm"].includes(await this.saysDate(t))));
+    // (A date only taken back with a no, "no, not September 3", is the offer's own no; "September 3 is not correct" is a
+    // correction, not a yes to the offer.)
     // After an answer, a goodbye names a letter the caller also mentioned (leave()), so it isn't dropped unsaid.
     if (this.awaiting === "more" && !named && !correction) {
       const how = `Here's how I counted. ${this.result.how_we_counted_spoken} `;
@@ -350,6 +377,12 @@ export class Dialog {
     else if (LENDER.test(t)) this.hoa = false;
     // A date with a negation, a hedge, a thanks or goodbye word, or a self-correction is read back before it is counted.
     // (Not for a letter that has no date to count from, a trustee's sale say: that one is answered as it is.)
+    // Said back again with chat at the check ("I believe September 3" to "…September 3?"): the check once more (marked
+    // by the date question's "no" flag, kept in the state), then the date question.
+    if (dt.kind === "confirm" && this.held && dt.date === this.held && this.letter) {
+      if (saidNo) { this.awaiting = "date"; this.date = null; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
+      const again = await this.confirm(dt.date); this.dateNo = true; return again;
+    }
     if (dt.kind === "confirm" && this.letter && (!det.recognized || det.letter_type === this.letter)
       && RULES.find(r => r.id === this.letter)?.anchor !== null) return this.confirm(dt.date);
     // A corrected date the decoder can't read, after an answer: the date is asked, not the old deadline said again.
@@ -428,6 +461,17 @@ export class Dialog {
     try { return (await this.dateTurn(t, await this.call("detect_letter", this.args({ text: t, letter_type: this.letter })))).kind; } catch { return "none"; }
   }
 
+  /** The letters a turn names (a letter, a which-kind question, or one also mentioned), added to the carry. */
+  async carryNamed(t) {
+    let det; try { det = await this.call("detect_letter", this.args({ text: t })); } catch { return; }
+    if (!det) return;
+    const ids = [...(det.also_detected ?? []), ...(det.also_asks ?? []).map(a => `ask:${a.label}`)];
+    if (det.recognized && det.letter_type !== this.letter) ids.unshift(det.letter_type);
+    const group = det.candidates?.length && AMBIGUOUS.find(g => g.label && g.candidates.length === det.candidates.length && g.candidates.every(c => det.candidates.includes(c)));
+    if (group) ids.unshift(`ask:${group.label}`);
+    this.carry = [...new Set([...this.carry, ...ids.filter(c => !c.startsWith("ask:") || CARRIED_ASKS.has(c))])].filter(c => c !== this.letter).slice(0, 3);
+  }
+
   /** Read a date back before counting from it, holding it (awaiting the date, with the date set). */
   async confirm(iso) {
     // The check starts the "no" count afresh: a "no, it was September 25" to it is a correction, not a second no.
@@ -454,37 +498,34 @@ export class Dialog {
    *  "confirm" (read it back first), "reask" (a date said and taken back), "never" (a relative day ruled out) or "none". */
   async dateTurn(t, det) {
     const iso = det?.suggested_notice_date ?? null;
+    // A turn that names a letter (not the one being asked about): the letters it names, read as the letters.
+    const describes = (id) => (RULES.find(r => r.id === id)?.detect ?? []).some(re => re.test(t));
+    const naming = det?.letter_type && (det.letter_type !== this.letter || describes(det.letter_type)) ? [det.letter_type, ...(det.also_detected ?? [])] : null;
     const cands = dateCandidates(t);
     if (DENIED_TURN.test(t) && (iso || cands.length)) return { kind: "reask" };
     if (cands.length) {
       if (!iso) return { kind: "unread" };   // a date the decoder can't read ("February 30", "the 3rd")
       const pos = cands.filter(c => !c.hard && !c.soft), neg = cands.filter(c => c.hard || c.soft);
       if (!pos.length) return neg.every(c => c.hard) ? { kind: "reask" } : { kind: "confirm", date: iso };   // "it wasn't September 3": check
-      // The date the caller gave, without the ones taken back (and their "not"): the decoder's if it's one of them,
-      // or the turn read again without the rest ("no, it was not the 3rd, it was September 5" → September 5).
-      let said = t; for (const c of [...neg].reverse()) said = said.slice(0, c.from) + " " + said.slice(c.end);
-      // The markers are read on the turn without the dates taken back (and a "not today" taken back with them), never
-      // with a "not" stripped: "September 3 is not correct" is a denial, "I'm not sure, September 3" a hedge.
-      const marked = said.replace(NOT_RELATIVE, " ");
-      const rest = said.replace(new RegExp(RELATIVE.source, "gi"), " ").replace(/\bnot\b/gi, " ");
+      // The date the caller gave: the decoder's if it's one of the kept ones, or the turn read again without the rest
+      // ("no, it was not the 3rd, it was September 5" → September 5).
       let date = pos.some(c => sameDay(iso, c)) ? iso : null;
-      if (!date) { try { const again = (await this.call("detect_letter", this.args({ text: rest, letter_type: this.letter })))?.suggested_notice_date; date = again && pos.some(c => sameDay(again, c)) ? again : null; } catch { date = null; } }
+      if (!date) {
+        let rest = t; for (const c of [...neg].reverse()) rest = rest.slice(0, c.from) + " " + rest.slice(c.end);
+        rest = rest.replace(new RegExp(RELATIVE.source, "gi"), " ").replace(/\bnot\b/gi, " ");
+        try { const again = (await this.call("detect_letter", this.args({ text: rest, letter_type: this.letter })))?.suggested_notice_date; date = again && pos.some(c => sameDay(again, c)) ? again : null; } catch { date = null; }
+      }
       if (!date) return { kind: "unread" };
-      // Two different days said, neither taken back ("the notice says September 3 but I got it September 5", "September 3
-      // or 4"): read the decoder's back, never count from it directly.
-      if (new Set(pos.map(c => `${c.month}-${c.day}`)).size > 1 && !neg.length) return { kind: "confirm", date };
-      // With the corrected-away parts gone, any marker left means the date is read back first.
-      return { kind: CONFIRM_MARKER.test(marked) ? "confirm" : "date", date };
+      // Direct only with one date and nothing but filler or receipt phrasing besides; else the check.
+      const direct = cands.length === 1 && otherWords(t, cands, naming).every(w => DIRECT_WORDS.has(w));
+      return { kind: direct ? "date" : "confirm", date };
     }
-    // A relative day said with a no, a "not" or a plan ("I'll check this afternoon") is never the date, read or not.
     if (RELATIVE.test(t) && (NEGATION.test(t) || FUTURE.test(t))) return { kind: "never" };
     if (!iso) return { kind: "none" };
-    // A date the decoder reads that isn't one of the explicit forms ("2026-09-03"): the markers apply to it too.
-    if (!RELATIVE.test(t)) return { kind: CONFIRM_MARKER.test(t) ? "confirm" : "date", date: iso };
-    // A relative day: only with a past receipt or on its own; then read back with thanks, a goodbye or a hedge.
-    const bare = !/\w/.test(t.replace(new RegExp(RELATIVE.source, "gi"), " ").replace(BARE_FILLER, " ").replace(new RegExp(BYE.source, "gi"), " ").replace(new RegExp(`\\b(?:${HEDGE})\\b`, "gi"), " "));
-    if (!RECEIPT.test(t) && !bare) return { kind: "never" };
-    return { kind: HEDGE_OR_BYE.test(t) ? "confirm" : "date", date: iso };
+    const words = otherWords(t, [], naming);
+    if (!RELATIVE.test(t)) return { kind: words.every(w => DIRECT_WORDS.has(w)) ? "date" : "confirm", date: iso };   // a date read only by the decoder
+    const bare = TODAYISH.test(t) ? words.every(w => BARE_WORDS.has(w)) : words.every(w => DIRECT_WORDS.has(w));
+    return { kind: bare ? "date" : "confirm", date: iso };
   }
 
   async letterInfo(id) {
