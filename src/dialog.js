@@ -49,6 +49,7 @@ export class Dialog {
     this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
     this.hoaSaid = false;         // the HOA step was already spoken for this letter (reset() clears it for the next one)
     this.carry = [];              // a second letter the caller named in the same turn ("…, I also got a 3 day notice"), next
+    this.dateNo = false;          // the caller said "no" to the date question once already
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
@@ -57,13 +58,13 @@ export class Dialog {
     if (done) { this.hoa = false; this.hoaSaid = false; }   // a finished conversation's HOA mention isn't the next one's
     return { say: text, done };
   }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; this.dateNo = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
     return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa, hoaSaid: this.hoaSaid,
-      carry: this.carry };
+      carry: this.carry, dateNo: this.dateNo };
   }
 
   /** Pick a conversation back up from snapshot(). Nothing it says is taken from the snapshot: the date question and
@@ -74,7 +75,7 @@ export class Dialog {
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null;
     dialog.candidates = snap.candidates ?? []; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
-    dialog.carry = snap.carry ?? [];
+    dialog.carry = snap.carry ?? []; dialog.dateNo = snap.dateNo === true;
     dialog.dateQuestion = RULES.find(r => r.id === dialog.letter)?.dateQuestion ?? null;
     if (dialog.awaiting === "more" || dialog.awaiting === "text") await dialog.compute();   // "how did you count?" reads the deadline
     dialog.last = await dialog.lastSaid();
@@ -90,6 +91,7 @@ export class Dialog {
       if (this.candidates.length && group) return group.question;
       return this.date ? `Got the date. ${UNKNOWN_LETTER}` : `${UNKNOWN_LETTER} And what date is on it?`;
     }
+    if (awaiting === "stop") return "Do you want to stop here?";
     if (awaiting === "text" && this.result) return `Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`;
     // Only a letter that can be answered: one with its date, or one that has no date to ask for.
     if ((awaiting === "more" || awaiting === "another") && letter && (this.date || RULES.find(r => r.id === letter)?.anchor === null)) {
@@ -105,6 +107,17 @@ export class Dialog {
     const t = (text || "").trim();
     if (!t) return this.say("Sorry, I didn't hear anything. " + GREETING);
     if (REPEAT.test(t) && !/\bdated\b|\bletter\b/i.test(t)) return this.say(this.last);
+    // "No" to the date question twice: go on to a letter the caller also named, or offer to stop, not the same ask again.
+    const saidNo = this.dateNo; this.dateNo = false;
+    if (this.awaiting === "date" && NO.test(t) && !LETTERISH.test(t)) {
+      if (saidNo && this.carry.length) return this.startCarry("Okay. ");
+      if (saidNo) { this.awaiting = "stop"; return this.say("Do you want to stop here?"); }
+      this.dateNo = true;
+    }
+    if (this.awaiting === "stop") {
+      if (YES.test(t) || BYE.test(t)) return this.goodbye();
+      if (NO.test(t)) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
+    }
 
     if (this.awaiting === "more") {
       if (HOW.test(t) || YES.test(t)) {

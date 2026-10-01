@@ -41,7 +41,7 @@ export function localCallTool() {
 }
 
 const LETTERS = new Set(listLetterTypes().map(t => t.id));
-const AWAITING = new Set(["letter", "date", "more", "text", "another"]);
+const AWAITING = new Set(["letter", "date", "more", "text", "another", "stop"]);
 
 /** The page sends back the state it was given, or anything at all: keep only well-formed fields. */
 export function cleanState(s) {
@@ -57,7 +57,8 @@ export function cleanState(s) {
   // only select the server's own text (a carrySpoken in the state is dropped).
   const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt by Dialog.restore() from the letter and the stage.
-  return { letter, date, awaiting, candidates, hoa, hoaSaid, carry };
+  const dateNo = s.dateNo === true;                                   // "no" to the date question once (only a real boolean)
+  return { letter, date, awaiting, candidates, hoa, hoaSaid, carry, dateNo };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).

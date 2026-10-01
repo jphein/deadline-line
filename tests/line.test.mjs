@@ -604,6 +604,24 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
   } finally { await mcp.close(); }
 });
 
+test("dialog: 'no' twice to the date question offers to stop, or goes on to a letter the caller also named", async () => {
+  const mcp = await startMcp();
+  try {
+    const run = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const out = []; for (const t of turns) out.push({ ...(await d.handle(t)), letter: d.letter, awaiting: d.awaiting }); return out; };
+    const stop = await run(["I got a 3 day notice", "no", "no", "yes"]);
+    assert.match(stop[1].say, /^I still need the date on the letter\./);
+    assert.equal(stop[2].say, "Do you want to stop here?");
+    assert.equal(stop[3].done, true);
+    const keep = await run(["I got a 3 day notice", "no", "no", "no", "September 28"]);
+    assert.match(keep[3].say, /^Okay\. What date is on it\?/); assert.equal(keep[4].letter, "ca-3day"); assert.match(keep[4].say, /^Your deadline is/);
+    const onward = await run(["the collection agency is suing me, I also got a 3 day notice", "no", "no"]);
+    assert.match(onward[2].say, /^Okay\. Now, about court papers for a lawsuit/); assert.equal(onward[2].letter, "ca-civil-summons");
+    // One "no", then the date: no stop offer.
+    const once = await run(["I got a 3 day notice", "no", "September 28"]);
+    assert.match(once[2].say, /^Your deadline is/);
+  } finally { await mcp.close(); }
+});
+
 test("dialog: restore() takes the HOA flag only as a real true (a tampered snapshot doesn't bring the step)", async () => {
   const mcp = await startMcp();
   try {

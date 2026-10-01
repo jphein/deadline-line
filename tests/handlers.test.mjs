@@ -57,6 +57,8 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["my homeowners association sent a notice of trustee's sale", "no"],
       ["my HOA sent me a letter", "a notice of default", "no"],
       ["I got a notice of default on my house", "it's from my HOA", "no"],
+      ["I got a 3 day notice", "no", "no", "no", "September 28"],
+      ["I got a 3 day notice", "no", "no", "say that again", "yes"],
       ["I got a notice of default on my house", "it's from my HOA", "it's from my HOA", "no"],
       ["my HOA sent a notice of default", "it's from my HOA", "no"],
       ["my friend Hoa helped me read the notice of default on my house", "no"],
@@ -85,7 +87,7 @@ test("api/decode: the SSA sample gives the real date, explains on request, and s
 test("api/decode GET: the greeting and a new conversation", T, async () => {
   const r = await decodeApi.GET(req("/api/decode"));
   assert.equal(r.status, 200); assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [] } });
+  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [], dateNo: false } });
 });
 
 test("api/decode: a carrySpoken the page sends is never spoken; the carried letter gets the server's own line", T, async () => {
@@ -145,13 +147,14 @@ test("api/decode: a tampered stage without the date it needs gets the greeting, 
 
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
-    { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [] });
+    { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [], dateNo: false });
   // Only a real boolean true survives as the HOA flag.
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoa: v }).hoa, want, String(v));
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoaSaid: v }).hoaSaid, want, String(v));
   // The carried letters: real ids only, at most three.
   assert.deepEqual(cleanState({ carry: ["ca-3day", "nope", "ca-3day", "ca-ud", "jury-summons", "ca-noa"] }).carry, ["ca-3day", "ca-ud", "jury-summons"]);
   assert.deepEqual(cleanState({ carry: "ca-3day" }).carry, []);
+  for (const [v, want] of [[true, true], ["yes", false], [1, false], [undefined, false]]) assert.equal(cleanState({ dateNo: v }).dateNo, want, String(v));
   // A carrySpoken in the state is dropped: the line about a carried letter is the server's own.
   assert.equal("carrySpoken" in cleanState({ carry: ["ca-civil-summons"], carrySpoken: "INJECTED TEXT" }), false);
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt on the server.
