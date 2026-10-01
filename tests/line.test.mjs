@@ -606,12 +606,12 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     assert.equal(stop[1].done, true);
     // No "act by" date for a letter with no date to count from (a Notice of Default's printed date is already past, a
     // sale's is too late): don't put it off.
-    assert.equal(stop[1].say, "Okay. Don't put off the Notice of Default: call back any time about it, or get free legal help. This is general information, not legal advice. Goodbye.");
-    for (const [id, name] of [["ca-foreclosure-sale", "the Notice of Trustee's Sale"], ["ca-small-claims", "the small claims court papers"]]) {
-      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
-      Object.assign(d, { letter: "jury-summons", awaiting: "another", carry: [id] });
-      assert.equal((await d.handle("no")).say, `Okay. Don't put off ${name}: call back any time about it, or get free legal help. This is general information, not legal advice. Goodbye.`, id);
-    }
+    const END = "This is general information, not legal advice. Goodbye.";
+    assert.equal(stop[1].say, `Okay. Don't put off dealing with the Notice of Default. Call back if you'd like to go over it, or look for free legal help. ${END}`);
+    const declined = async (id) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); Object.assign(d, { letter: "jury-summons", awaiting: "another", carry: [id] }); return (await d.handle("no")).say; };
+    // The trustee's sale only: reinstatement ends five business days before the sale date (Civ. Code § 2924c(e)).
+    assert.equal(await declined("ca-foreclosure-sale"), `Okay. Don't put off dealing with the Notice of Trustee's Sale. If you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. Call back if you'd like to go over it, or look for free legal help. ${END}`);
+    assert.equal(await declined("ca-small-claims"), `Okay. Don't put off dealing with the small claims court papers. Call back if you'd like to go over it, or look for free legal help. ${END}`);
     // A carried question: with nothing to count first, it's asked at once; after a counted answer, where the carried
     // letter would come in; "no" twice at the date question goes on to it too.
     const asked = await run(["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"]);

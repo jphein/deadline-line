@@ -167,7 +167,11 @@ export class Dialog {
       if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !named) {
         if (YES.test(t)) return this.startCarry("");
         // No date to count from, so no "act by" date (a Notice of Default's printed date is already past; a sale's is too late).
-        if (NO.test(t)) return this.goodbye(`Don't put off ${theLetter((await this.letterInfo(carry[0])).short)}: call back any time about it, or get free legal help. `);
+        if (NO.test(t)) {
+          // A trustee's sale: reinstatement ends five business days before the sale date (Civ. Code § 2924c(e)), not on it.
+          const sale = carry[0] === "ca-foreclosure-sale" ? "If you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. " : "";
+          return this.goodbye(`Don't put off dealing with ${theLetter((await this.letterInfo(carry[0])).short)}. ${sale}Call back if you'd like to go over it, or look for free legal help. `);
+        }
       }
       if (!carry.length && NO.test(t) && !named) return this.goodbye();
       this.reset();
