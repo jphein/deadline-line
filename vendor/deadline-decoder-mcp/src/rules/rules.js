@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 308854d59bb8ba77f551975cf415351fa0a9dad8), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ e0d4a46c5030f1cc0a2078ccaaac3abed7871e38), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
