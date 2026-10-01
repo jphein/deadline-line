@@ -12,7 +12,6 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 // "what did you say", "sorry, what?", or a bare "again", "huh" or "what". "They denied me again" isn't one.
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
-const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
 // "H.O.A." in any case; the bare "HOA" in capitals or lowercase, never "Hoa" (a given name); ASR's spaced
@@ -34,6 +33,9 @@ const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
 const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
+// "a Notice of Default" → "the Notice of Default"; "small claims court papers" → "the small claims court papers".
+const theLetter = (name) => /^the /i.test(name) ? name : `the ${name.replace(/^an? /i, "")}`;
+const STOP_OFFER = "If you find the date, call back right away: some of these run out in days. Do you want to stop here?";
 // A carried question ("…, I also got a summons": eviction, lawsuit or jury?) is kept as "ask:<its group's label>"; the
 // question and its candidates are the rules' own, looked up here, never taken from the state the page sends back.
 export const CARRIED_ASKS = new Map(AMBIGUOUS.filter(g => g.label).map(g => [`ask:${g.label}`, g]));
@@ -94,7 +96,7 @@ export class Dialog {
       if (this.candidates.length && group) return group.question;
       return this.date ? `Got the date. ${UNKNOWN_LETTER}` : `${UNKNOWN_LETTER} And what date is on it?`;
     }
-    if (awaiting === "stop") return "Do you want to stop here?";
+    if (awaiting === "stop") return STOP_OFFER;
     if (awaiting === "text" && this.result) return `Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`;
     // Only a letter that can be answered: one with its date, or one that has no date to ask for.
     if ((awaiting === "more" || awaiting === "another") && letter && (this.date || RULES.find(r => r.id === letter)?.anchor === null)) {
@@ -110,22 +112,28 @@ export class Dialog {
     const t = (text || "").trim();
     if (!t) return this.say("Sorry, I didn't hear anything. " + GREETING);
     if (REPEAT.test(t) && !/\bdated\b|\bletter\b/i.test(t)) return this.say(this.last);
+    // A yes, no or goodbye that also names a letter ("no, but I also got an eviction summons", "thanks, I also got an
+    // unlawful detainer") is about that letter, not an answer to the question: the decoder decides, not a word list.
+    // Right after an answer ("explain how I counted?", the text offer), the letter just answered doesn't count: "no, I
+    // understand the 3 day notice" is a no. At the other stages it does ("yes, I also got a 3 day notice" at the stop offer).
+    const current = this.awaiting === "more" || this.awaiting === "text" ? this.letter : null;
+    const named = (YES.test(t) || NO.test(t) || BYE.test(t)) && await this.namesLetter(t, current);
     // "No" to the date question twice: go on to a letter the caller also named, or offer to stop, not the same ask again.
     const saidNo = this.dateNo; this.dateNo = false;
-    if (this.awaiting === "date" && NO.test(t) && !LETTERISH.test(t)) {
+    if (this.awaiting === "date" && NO.test(t) && !named) {
       if (saidNo && this.carry.length) return this.startCarry("Okay. ");
-      if (saidNo) { this.awaiting = "stop"; return this.say("Do you want to stop here?"); }
+      if (saidNo) { this.awaiting = "stop"; return this.say(STOP_OFFER); }
       this.dateNo = true;
     }
     // "Do you want to stop here?": a letter named in the reply ("yes, I also got a 3 day notice") is taken up, not a goodbye.
     // (A forged "stop" stage plus "yes" says goodbye without the offer having been made: self-only, like any stage the page
     // sends back; the state isn't authenticated.)
-    if (this.awaiting === "stop" && !LETTERISH.test(t)) {
+    if (this.awaiting === "stop" && !named) {
       if (YES.test(t) || BYE.test(t)) return this.goodbye();
       if (NO.test(t)) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
     }
 
-    if (this.awaiting === "more") {
+    if (this.awaiting === "more" && !named) {
       if (HOW.test(t) || YES.test(t)) {
         this.awaiting = "text";
         return this.say(`Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`);
@@ -133,7 +141,7 @@ export class Dialog {
       if (NO.test(t) && this.carry.length) return this.startCarry("Okay. ");
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
-    if (this.awaiting === "text") {
+    if (this.awaiting === "text" && !named) {
       const texted = "Okay. In the real service I'd text the date and a calendar reminder to this number. ";
       // A letter the caller also named comes next, rather than the goodbye.
       if (this.carry.length && (YES.test(t) || NO.test(t))) return this.startCarry(YES.test(t) ? texted : "Okay. ");
@@ -141,7 +149,7 @@ export class Dialog {
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
     // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
-    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !LETTERISH.test(t)) {
+    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !(await this.namesLetter(t, this.letter))) {
       const r = this.result ?? await this.compute();
       const step = r.next_steps.find(s => HOA_STEP.test(s));
       const ask = this.awaiting === "more" ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
@@ -151,28 +159,33 @@ export class Dialog {
     }
     let switched = null;
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
-      if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();
+      if (BYE.test(t) && !named) return this.goodbye();
       const carry = this.carry;
       // A carried question first (not reached in real flows: answer() opens it itself; kept for a state the page sends).
       if (CARRIED_ASKS.has(carry[0])) return this.startCarry("");
       // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
-      if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !LETTERISH.test(t)) {
+      if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !named) {
         if (YES.test(t)) return this.startCarry("");
-        if (NO.test(t)) return this.goodbye();
+        // No date to count from, so no "act by" date (a Notice of Default's printed date is already past; a sale's is too late).
+        if (NO.test(t)) return this.goodbye(`Don't put off ${theLetter((await this.letterInfo(carry[0])).short)}: call back any time about it, or get free legal help. `);
       }
-      if (!carry.length && NO.test(t) && !LETTERISH.test(t)) return this.goodbye();
+      if (!carry.length && NO.test(t) && !named) return this.goodbye();
       this.reset();
       // The letter the caller also named: this turn is about it (its date, or just "okay").
       if (carry.length) { [switched, ...this.carry] = carry; this.letter = switched; }
-      else if (YES.test(t) && !LETTERISH.test(t)) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
+      else if (YES.test(t) && !named) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
     }
     const answered = this.awaiting === "more" || this.awaiting === "text";
-    if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
+    if (BYE.test(t) && !named) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
 
     // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
     // ("the due date was August 1st" looks back for a shutoff notice).
     const det = await this.call("detect_letter", this.args(this.candidates.length ? { text: t, among: this.candidates }
       : this.letter ? { text: t, letter_type: this.letter } : { text: t }));
+    // A bare yes or no to a which-kind question the decoder can't settle ("Is it about an eviction, a lawsuit about money,
+    // or jury duty?" → "yes"): that question again, not the generic "I couldn't tell".
+    const open = AMBIGUOUS.find(g => this.candidates.length && g.candidates.length === this.candidates.length && g.candidates.every(c => this.candidates.includes(c)));
+    if (open && !det.recognized && !det.candidates?.length && (YES.test(t) || NO.test(t)) && !named) { this.awaiting = "letter"; return this.say(open.question); }
     this.candidates = det.candidates ?? [];   // a "which one?" question stays open for the next turn only
     // After an answer, a "which one?" is about a new letter ("the summons"): not the one just answered.
     if (answered && this.candidates.length) { this.letter = null; this.date = null; }
@@ -267,5 +280,14 @@ export class Dialog {
   }
 
   closing() { return "This is general information, not legal advice. Goodbye."; }
-  goodbye() { this.awaiting = null; return this.say("Okay. " + this.closing(), true); }
+  goodbye(before = "") { this.awaiting = null; return this.say("Okay. " + before + this.closing(), true); }
+
+  /** Does this turn name a letter, as the decoder hears it (a letter, a which-kind question, or one carried)? */
+  async namesLetter(t, current = null) {
+    // A failed or empty detection names nothing: the plain yes, no or goodbye is answered as before.
+    let det;
+    try { det = await this.call("detect_letter", this.args({ text: t })); } catch { return false; }
+    if (det?.candidates?.length || det?.also_detected?.length || det?.also_asks?.length) return true;
+    return Boolean(det?.recognized && det.letter_type !== current);
+  }
 }
