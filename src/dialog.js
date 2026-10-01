@@ -12,11 +12,14 @@ const HOW = /\b(how|explain|counted|count|why)\b/i;
 // "what did you say", "sorry, what?", or a bare "again", "huh" or "what". "They denied me again" isn't one.
 const REPEAT = /\b(repeat|pardon|come again|one more time|what was that|what did you (just )?say)\b|^\W*((can|could|would|will) you |please )?(say|tell me|read( it| that)?|go over( it| that)?)\b( \w+){0,2} again\b|\bagain,? please\b|^\W*(sorry,? )?(again|huh|what)\W*$|^\W*sorry\W*$|^\W*sorry,? what\b/i;
 const BYE = /\b(bye|goodbye|that's all|that is all|hang up|thank you|thanks)\b/i;
+// A no that ends in a yes ("no, okay go ahead", "no wait, yes"): the caller corrected themselves, and the yes wins.
+const NO_THEN_YES = /\b(no|nope|nah)\b.*\b(go ahead|go on|yes|yeah|yep|sure)\W*$/i;
 // A goodbye said outright, not just thanks: "okay bye" is a goodbye, "no thanks" at an offer is still a no.
 const FAREWELL = /\b(bye|goodbye|hang up)\b/i;
-// A goodbye said negated asks the line to stay ("please don't hang up", "no need to say goodbye", "don't go"): it's taken
-// out of the reply before the goodbye words are looked for.
-const STAY = /\b(don'?t|do not|never|no need to|before you)\s+(\w+\s+)?(hang up|say (good)?bye)\b|\b(don'?t|do not) (go|leave)\b/i;
+// The caller asking the line to stay ("please don't hang up", "no need to say goodbye", "don't go", "hold on", "stay on the
+// line", "wait, please"): it's taken out of the reply before the yes, no and goodbye words are looked for. "Never mind
+// hang up" is a goodbye.
+const STAY = /\b(please,?\s+)?((don'?t|do not|never(?!\s+mind)|no need to)\s+((want|need) (you )?to\s+|\w+\s+)?(hang up|say (good)?bye)\b|(don'?t|do not) (go|leave)\b|(stay on|hold) the line\b|hold on\b|wait\b)(,?\s+please\b)?/i;
 const STAY_ALL = new RegExp(STAY.source, "gi");
 // An HOA by name: "HOA" (also spelled out as ASR writes it, "H.O.A." or "h o a"), a homeowners', condo, community or
 // owners' association. Not any "association" (the bar association, a neighborhood meeting, a credit union's).
@@ -41,6 +44,8 @@ const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
 // "a Notice of Default" → "the Notice of Default"; "small claims court papers" → "the small claims court papers".
 const theLetter = (name) => /^the /i.test(name) ? name : `the ${name.replace(/^an? /i, "")}`;
+// Reinstatement ends five business days before a trustee's sale (Civ. Code § 2924c(e)), not on the sale date.
+const SALE_CUTOFF = "the cutoff is generally five business days before the sale date, not the sale date itself.";
 const STOP_OFFER = "If you find the date, call back right away: some of these run out in days. Do you want to stop here?";
 // A carried question ("…, I also got a summons": eviction, lawsuit or jury?) is kept as "ask:<its group's label>"; the
 // question and its candidates are the rules' own, looked up here, never taken from the state the page sends back.
@@ -115,8 +120,13 @@ export class Dialog {
   }
 
   async handle(text) {
-    const t = (text || "").trim();
-    this.staying = STAY.test(t);   // "don't hang up": this turn doesn't end the call (end())
+    this.declinedDated = false;
+    const t = (text || "").trim().replace(/[\u2018\u2019]/g, "'");   // ASR's curly apostrophes (U+2018, U+2019) as plain ones
+    // "Don't hang up": this turn doesn't end the call (end()). What was open is kept, to be asked again.
+    const unsaid = STAY.test(t) ? t.replace(STAY_ALL, " ") : t;   // the reply without "please don't hang up"
+    // …and only when no goodbye is left once it's taken out ("don't hang up, bye" is a goodbye).
+    this.staying = unsaid !== t && !FAREWELL.test(unsaid);
+    this.before = this.staying ? { ...this.snapshot(), result: this.result } : null;
     if (!t) return this.say("Sorry, I didn't hear anything. " + GREETING);
     if (REPEAT.test(t) && !/\bdated\b|\bletter\b/i.test(t)) return this.say(this.last);
     // A yes, no or goodbye that also names a letter ("no, but I also got an eviction summons", "thanks, I also got an
@@ -135,36 +145,45 @@ export class Dialog {
     // "Do you want to stop here?": a letter named in the reply ("yes, I also got a 3 day notice") is taken up, not a goodbye.
     // (A forged "stop" stage plus "yes" says goodbye without the offer having been made: self-only, like any stage the page
     // sends back; the state isn't authenticated.)
-    const stay = this.staying, unsaid = stay ? t.replace(STAY_ALL, " ") : t;
-    const bye = BYE.test(unsaid), farewell = FAREWELL.test(unsaid);
+    const stay = this.staying, u = unsaid;
+    const bye = BYE.test(u), farewell = FAREWELL.test(u);
     // A yes with no goodbye in it ("yes thanks", "yes, please don't hang up"); one with a goodbye ("yes, bye", "okay bye")
     // is carried out, then the call ends.
-    const yes = YES.test(t) && !farewell;
+    const yes = YES.test(u) && !farewell;
+    // At the offers (go on to it, explain, text) a no wins over a yes-word said with it ("okay, no thanks"), unless the
+    // reply ends in a yes ("no, okay go ahead").
+    const no = NO.test(u) && !NO_THEN_YES.test(u);
+    this.saidNo = no;   // a stay said with a no ("no, don't hang up"): the question is answered, not asked again
     // A no to stopping, with thanks or not ("no thanks", "no, that's all"), or a "don't hang up" asks the date again: the
     // caller can still say bye, while a call ended on a misread "no" loses the deadline. A goodbye said outright ("no thank
     // you, goodbye") ends it.
     if (this.awaiting === "stop" && !named) {
-      if ((NO.test(t) && !farewell) || stay) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
-      if (YES.test(t) || bye) return this.goodbye();
+      if ((NO.test(u) && !farewell) || stay) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
+      if (YES.test(u) || bye) return this.goodbye();
     }
+    // A stay request and nothing else ("please don't hang up", "hold on"): the open question again, nothing changed.
+    if (stay && !named && !/\w/.test(u)) { const ask = await this.openQuestion(); if (ask) return this.say(`Okay. ${ask}`); }
 
     // After an answer, a goodbye names a letter the caller also mentioned (leave()), so it isn't dropped unsaid.
     if (this.awaiting === "more" && !named) {
       const how = `Here's how I counted. ${this.result.how_we_counted_spoken} `;
+      // A no first ("okay, no thank you, goodbye"), unless the caller asks how. Said with a goodbye it ends the call; it
+      // doesn't start the letter carried.
+      if (no && !HOW.test(u)) return !farewell && this.carry.length ? this.startCarry("Okay. ") : this.leave();
       // A yes said with a goodbye ("yes, bye", "explain it, then hang up"): the explanation, then the goodbye.
-      if ((HOW.test(t) || YES.test(t)) && farewell) return this.leave(how);
-      if (HOW.test(t) || yes) { this.awaiting = "text"; return this.say(`${how}Would you like me to text you the date?`); }
-      // A no said with a goodbye ("no thank you, goodbye") ends the call: it doesn't start the letter carried.
-      if (NO.test(t) && !farewell && this.carry.length) return this.startCarry("Okay. ");
-      if (NO.test(t) || bye) return this.leave();
+      if ((HOW.test(u) || YES.test(u)) && farewell) return this.leave(how);
+      if (HOW.test(u) || yes) { this.awaiting = "text"; return this.say(`${how}Would you like me to text you the date?`); }
+      if (NO.test(u) || bye) return this.leave();
     }
     if (this.awaiting === "text" && !named) {
       const texted = "Okay. In the real service I'd text the date and a calendar reminder to this number. ";
-      // A letter the caller also named comes next, rather than the goodbye; not after a goodbye said with the yes or no.
-      if (this.carry.length && (yes || (NO.test(t) && !farewell))) return this.startCarry(yes ? texted : "Okay. ");
+      // A no first; a letter the caller also named comes next, rather than the goodbye, but not after a goodbye said with
+      // the yes or no.
+      if (no) return !farewell && this.carry.length ? this.startCarry("Okay. ") : this.leave();
+      if (this.carry.length && yes) return this.startCarry(texted);
       // A yes said with a goodbye ("yes, bye", "okay bye"): the text, then the goodbye.
-      if (YES.test(t)) return this.leave(texted);
-      if (NO.test(t) || bye) return this.leave();
+      if (YES.test(u)) return this.leave(texted);
+      if (NO.test(u) || bye) return this.leave();
     }
     // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
     if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !(await this.namesLetter(t, this.letter))) {
@@ -182,24 +201,32 @@ export class Dialog {
       // to "Want me to go on to it?" its goodbye names the letter (and, for a trustee's sale, the reinstatement cutoff); so
       // is one said with a goodbye ("no thank you, goodbye": a decline, and the cutoff still matters). A yes with thanks
       // ("yes, thank you") is a yes: it takes the letter up. "Thanks", "bye" or "okay bye" alone is the plain goodbye.
-      if (bye && !named && !((NO.test(t) || (yes && carry.length)) && !CARRIED_ASKS.has(carry[0]))) return this.goodbye();
+      // With a letter carried, the goodbye names it (leave()), as after an answer: "bye" at "Want me to go on to it?" for a
+      // trustee's sale still hears the cutoff.
+      // "What date is on it?" for a carried letter that has one: a goodbye or a no is answered after the decoder has looked
+      // for a date ("September 3, thanks" is its date; "no thanks" declines it, with the goodbye that names it).
+      const dated = carry.length > 0 && !named && !CARRIED_ASKS.has(carry[0]) && (await this.letterInfo(carry[0])).needs_date !== false;
+      if (bye && !named && !dated && !((NO.test(u) || (yes && carry.length)) && !CARRIED_ASKS.has(carry[0]))) return carry.length ? this.leave() : this.goodbye();
       // A carried question first (not reached in real flows: answer() opens it itself; kept for a state the page sends).
       if (CARRIED_ASKS.has(carry[0])) return this.startCarry("");
       // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
       if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !named) {
-        // A no wins over a yes-word said with it ("yeah no thanks", "okay, no thanks", "no, okay go ahead"): a decline,
-        // whose goodbye names the letter, so nothing is lost unsaid.
-        if (NO.test(t)) return this.goodbye(await this.dontPutOff(carry[0]));
-        if (YES.test(t)) return this.startCarry("");
+        // A no wins over a yes-word said with it ("yeah no thanks", "okay, no thanks"): a decline, whose goodbye names the
+        // letter, so nothing is lost unsaid. A no that ends in a yes ("no, okay go ahead") takes it up.
+        if (no) return this.leave("Okay. ", true);
+        if (YES.test(u)) return this.startCarry("");
       }
-      if (!carry.length && NO.test(t) && !named) return this.goodbye();
+      const declinedDated = dated && (no || (bye && !yes)) ? (no ? "no" : "bye") : false;
+      if (!carry.length && NO.test(u) && !named) return this.goodbye();
       this.reset();
-      // The letter the caller also named: this turn is about it (its date, or just "okay").
-      if (carry.length) { [switched, ...this.carry] = carry; this.letter = switched; }
-      else if (YES.test(t) && !named) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
+      // The letter the caller also named: this turn is about it (its date, or just "okay"). A different letter named here
+      // ("before you say goodbye, I also got a summons") comes first, and the carried one is kept for after it.
+      if (carry.length && !named) { [switched, ...this.carry] = carry; this.letter = switched; this.declinedDated = declinedDated; }
+      else if (carry.length) this.carry = carry;
+      else if (YES.test(u) && !named) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
     }
     const answered = this.awaiting === "more" || this.awaiting === "text";
-    if (bye && !named) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
+    if (bye && !named && !switched) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
 
     // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
     // ("the due date was August 1st" looks back for a shutoff notice).
@@ -225,6 +252,7 @@ export class Dialog {
     else if (LENDER.test(t)) this.hoa = false;
     if (switched && !det.recognized) {
       const info = await this.letterInfo(switched);
+      if (!this.date && this.declinedDated) { this.carry = [switched, ...this.carry]; this.letter = null; return this.leave("Okay. ", this.declinedDated === "no"); }
       if (!this.date && info.needs_date === false) return this.answer(t);
       if (!this.date) { this.awaiting = "date"; return this.say(`Okay, about ${info.short}. ${ASK_DATE}`); }
     }
@@ -306,34 +334,63 @@ export class Dialog {
    *  sale's is too late), so don't put it off. */
   async dontPutOff(id) {
     // A trustee's sale: reinstatement ends five business days before the sale date (Civ. Code § 2924c(e)), not on it.
-    const sale = id === "ca-foreclosure-sale" ? "If you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. " : "";
+    const sale = id === "ca-foreclosure-sale" ? `If you want to catch up on the loan, ${SALE_CUTOFF} ` : "";
     return `Don't put off dealing with ${theLetter((await this.letterInfo(id)).short)}. ${sale}Call back if you'd like to go over it, or look for free legal help. `;
   }
 
   /** The goodbye after an answer (after `prefix`: the text line, or the explanation). A letter still carried is named in
    *  it: an undated one "Don't put off …", a dated one or a carried question "call back with its date / about it". */
-  async leave(prefix = "Okay. ") {
-    const [id] = this.carry;
-    let line = "";
-    if (id && !CARRIED_ASKS.has(id) && (await this.letterInfo(id)).needs_date === false) line = await this.dontPutOff(id);
-    else if (id) {
+  async leave(prefix = "Okay. ", acted = prefix !== "Okay. ") {
+    const undated = async (id) => !CARRIED_ASKS.has(id) && (await this.letterInfo(id)).needs_date === false;
+    let line = "", rest = this.carry;
+    if (rest.length && await undated(rest[0])) { line = await this.dontPutOff(rest[0]); rest = rest.slice(1); }
+    // Every other letter carried is named too ("…the jury summons. You also mentioned the 60-day notice to move out: …").
+    if (rest.length) {
       const names = [];
-      for (const c of this.carry) names.push(theLetter(CARRIED_ASKS.get(c)?.label ?? (await this.letterInfo(c)).short));
-      line = `You also mentioned ${names.join(" and ")}: call back ${this.carry.length > 1 ? "about them" : CARRIED_ASKS.has(id) ? "about it" : "with its date"}, or look for free legal help. `;
+      for (const c of rest) names.push(theLetter(CARRIED_ASKS.get(c)?.label ?? (await this.letterInfo(c)).short));
+      const how = rest.length > 1 ? "about them" : CARRIED_ASKS.has(rest[0]) || await undated(rest[0]) ? "about it" : "with its date";
+      line += `You also mentioned ${names.join(" and ")}: call back right away ${how}, or look for free legal help. `;
     }
-    return this.end(prefix + line);
+    // A trustee's sale carried behind another letter: its cutoff is still said.
+    if (this.carry.slice(1).includes("ca-foreclosure-sale")) line += `For the Notice of Trustee's Sale: if you want to catch up on the loan, ${SALE_CUTOFF} `;
+    return this.end(prefix + line, acted);
   }
 
   /** End the call after `text`, unless the caller asked the line to stay ("no, don't hang up", "thanks, don't hang up"):
    *  then it stays open for another letter, whatever was said with it. */
-  end(text) {
+  async end(text, acted = false) {
     if (!this.staying) { this.awaiting = null; return this.say(text + this.closing(), true); }
+    // "Thanks, please don't hang up" (nothing done, no "no"): what was open stays open, and its question is asked again.
+    // Something done on this turn (the text line, the explanation, a declined letter's goodbye) or a "no" closes it.
+    if (!acted && !this.saidNo && this.before) {
+      const { result, ...snap } = this.before;
+      Object.assign(this, snap, { result, carry: [...snap.carry], candidates: [...snap.candidates] });
+      const ask = await this.openQuestion();
+      if (ask) return this.say(`Okay. ${ask}`);
+    }
     this.reset(); this.awaiting = "another";
     return this.say(`${text}I'm still here: tell me about another letter, or say goodbye when you're done.`);
   }
 
+  /** The question open at this stage, to ask again (null when nothing is open). */
+  async openQuestion() {
+    const [id] = this.carry;
+    switch (this.awaiting) {
+      case "date": return this.dateQuestion ?? ASK_DATE;
+      case "letter": return this.lastSaid();
+      case "stop": return STOP_OFFER;
+      case "more": return "Want me to explain how I counted?";
+      case "text": return "Would you like me to text you the date?";
+      case "another":
+        if (!id) return "Do you have another letter I can help with?";
+        if (CARRIED_ASKS.has(id)) return CARRIED_ASKS.get(id).question;
+        return (await this.letterInfo(id)).needs_date === false ? "Want me to go on to it?" : "What date is on it?";
+      default: return null;
+    }
+  }
+
   closing() { return "This is general information, not legal advice. Goodbye."; }
-  goodbye(before = "") { return this.end("Okay. " + before); }
+  goodbye(before = "") { return this.end("Okay. " + before, before !== ""); }
 
   /** Does this turn name a letter, as the decoder hears it (a letter, a which-kind question, or one carried)? */
   async namesLetter(t, current = null) {

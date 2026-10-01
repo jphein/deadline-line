@@ -794,15 +794,35 @@ test("dialog: a polite no is a no at 'Want me to go on to it?' and at the stop o
       assert.deepEqual([(await offered(SALE_FIRST, reply)).say, (await offered(SALE_FIRST, reply)).done], [SALE, true], reply);
       assert.equal((await offered(NOD_FIRST, reply)).say, NOD, reply);
     }
-    // A goodbye without a no is still the plain goodbye; "yes" still takes the letter up.
-    for (const reply of ["bye", "thanks", "okay bye"]) assert.equal((await offered(SALE_FIRST, reply)).say, `Okay. ${END}`, reply);
-    // Only that offer: a carried letter that has a date to ask ("What date is on it?") keeps the plain goodbye.
-    const dated = new Dialog(mcp.callTool, { today: "2026-09-30" });
-    assert.match((await dated.handle("I got a jury summons, I also got a 60 day notice to move out")).say, /What date is on it\?$/);
-    assert.equal((await dated.handle("no thanks")).say, `Okay. ${END}`);
-    // A carried question in the state the page sends (not reached in real flows): a goodbye with a no still ends the call.
+    // A goodbye without a no names the letter too, as after an answer: the sale's cutoff isn't lost on a "bye"; "yes"
+    // still takes the letter up.
+    for (const reply of ["bye", "thanks", "okay bye", "yes, bye"]) {
+      assert.equal((await offered(SALE_FIRST, reply)).say, SALE, reply); assert.equal((await offered(NOD_FIRST, reply)).say, NOD, reply);
+    }
+    // A carried letter that has a date to ask ("What date is on it?"): a no or a goodbye declines it with the goodbye that
+    // names it; a yes with thanks goes on to its date; a date said with thanks is read.
+    const SIXTY_FIRST = "I got a jury summons, I also got a 60 day notice to move out";
+    const DATED = `Okay. You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. ${END}`;
+    const datedAt = async (reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      assert.match((await d.handle(SIXTY_FIRST)).say, /What date is on it\?$/); return { ...(await d.handle(reply)), letter: d.letter }; };
+    for (const reply of ["no thanks", "no", "no thank you, goodbye", "bye", "thanks"]) assert.equal((await datedAt(reply)).say, DATED, reply);
+    for (const reply of ["yes thanks", "yes, thank you"]) {
+      const r = await datedAt(reply);
+      assert.deepEqual([r.say, r.done, r.letter], ["Okay, about a 60-day notice to move out. What date is on it? You can say something like September 13th.", false, "ca-60day-notice"], reply);
+    }
+    for (const reply of ["September 3", "September 3, thanks", "no, it was September 3"])
+      assert.match((await datedAt(reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
+    // A carried question in the state the page sends (not reached in real flows): a goodbye with a no ends the call, naming it.
     const asked = new Dialog(mcp.callTool, { today: "2026-09-30" }); Object.assign(asked, { letter: "jury-summons", awaiting: "another", carry: ["ask:a summons or court papers"] });
-    assert.equal((await asked.handle("no thank you, goodbye")).say, `Okay. ${END}`);
+    assert.equal((await asked.handle("no thank you, goodbye")).say, `Okay. You also mentioned the summons or court papers: call back right away about it, or look for free legal help. ${END}`);
+    // A different letter named at the offer comes first, and the carried one is kept for after it.
+    const other = new Dialog(mcp.callTool, { today: "2026-09-30" }); await other.handle(NOD_FIRST);
+    assert.equal((await other.handle("before you say goodbye, I also got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
+    assert.deepEqual(other.carry, ["ca-foreclosure-nod"]);
+    await other.handle("an eviction");
+    assert.match((await other.handle("September 29")).say, /You also mentioned a Notice of Default; tell me about that next\. Want me to explain how I counted\?$/);
+    const three = new Dialog(mcp.callTool, { today: "2026-09-30" }); await three.handle(NOD_FIRST);
+    await three.handle("yes, and I also got a 3 day notice"); assert.deepEqual([three.letter, three.carry], ["ca-3day", ["ca-foreclosure-nod"]]);
     // A yes with thanks takes the carried letter up, like "yes" (sale and NOD); a no said with a goodbye is still a decline,
     // so it keeps the goodbye that names the letter (for the sale, the cutoff is still the one fact to hear).
     for (const reply of ["yes thanks", "yes please", "yes, thank you"]) {
@@ -811,11 +831,17 @@ test("dialog: a polite no is a no at 'Want me to go on to it?' and at the stop o
       assert.match((await offered(NOD_FIRST, reply)).say, /^A Notice of Default starts the foreclosure clock/, reply);
     }
     assert.equal((await offered(SALE_FIRST, "no thank you, goodbye")).say, SALE);
-    // A no wins over a yes-word said with it: "yeah no thanks", "okay, no thanks", "no thanks, okay" and "no, okay go
-    // ahead" decline (the rule: a no anywhere in the reply declines, and the goodbye names the letter, so a caller who
-    // meant yes still hears what to do and can call back).
-    for (const reply of ["yeah no thanks", "okay, no thanks", "sure, no thank you", "no thanks, okay", "no, okay go ahead"]) {
+    // A no wins over a yes-word said with it: "yeah no thanks", "okay, no thanks" and "no thanks, okay" decline (the
+    // goodbye names the letter, so a caller who meant yes still hears what to do and can call back). The rule's one
+    // exception, a design choice: a no that ends in a yes ("no, okay go ahead", "no wait, yes") is a self-correction, and
+    // the yes wins.
+    for (const reply of ["yeah no thanks", "okay, no thanks", "sure, no thank you", "no thanks, okay"]) {
       assert.equal((await offered(SALE_FIRST, reply)).say, SALE, reply); assert.equal((await offered(NOD_FIRST, reply)).say, NOD, reply);
+    }
+    for (const reply of ["no, okay go ahead", "no wait, yes"]) {
+      const r = await offered(SALE_FIRST, reply);
+      assert.deepEqual([r.letter, r.done], ["ca-foreclosure-sale", false], reply); assert.match(r.say, /^A Notice of Trustee's Sale prints the date/, reply);
+      assert.match((await offered(NOD_FIRST, reply)).say, /^A Notice of Default starts the foreclosure clock/, reply);
     }
     // "No, don't hang up": the decline, and the line stays open; "yes, please don't hang up" takes the letter up.
     const staying = await offered(SALE_FIRST, "no, don't hang up");
@@ -853,10 +879,10 @@ test("dialog: a polite no is a no at 'Want me to go on to it?' and at the stop o
     const STILL = "I'm still here: tell me about another letter, or say goodbye when you're done.";
     const CARRIES = [
       [MORE, ""],
-      [also("I also got a 60 day notice to move out"), "You also mentioned the 60-day notice to move out: call back with its date, or look for free legal help. "],
+      [also("I also got a 60 day notice to move out"), "You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. "],
       [also("plus a notice of default"), `Don't put off dealing with the Notice of Default. ${CB}`],
       [also("plus a notice of trustee's sale"), `Don't put off dealing with the Notice of Trustee's Sale. If you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. ${CB}`],
-      [also("I also got a summons"), "You also mentioned the summons or court papers: call back about it, or look for free legal help. "],
+      [also("I also got a summons"), "You also mentioned the summons or court papers: call back right away about it, or look for free legal help. "],
     ];
     for (const [more, line] of CARRIES) {
       const text = [...more, "yes"], label = more[0];
@@ -884,10 +910,109 @@ test("dialog: a polite no is a no at 'Want me to go on to it?' and at the stop o
     assert.match((await at([...SIXTY, "yes"], "okay")).say, /^Okay\. In the real service I'd text the date and a calendar reminder to this number\. Now, about a 60-day notice to move out\./);
     for (const setup of [SIXTY, [...SIXTY, "yes"]]) assert.match((await at(setup, "no thanks")).say, /^Okay\. Now, about a 60-day notice to move out\./);
     // "Don't hang up" at the date question isn't a goodbye either.
-    for (const reply of ["don't hang up", "no, don't hang up"]) assert.match((await at(["I got a 30 day notice"], reply)).say, /^I still need the date on the letter\./, reply);
+    assert.match((await at(["I got a 30 day notice"], "no, don't hang up")).say, /^I still need the date on the letter\./);
+    assert.match((await at(["I got a 30 day notice"], "don't hang up")).say, /^Okay\. What day was the notice handed to you\?/);
     // A goodbye that names a letter is about the letter (namesLetter, the decoder): the summons question, at every offer.
     for (const setup of [STOP, MORE, [...SIXTY, "yes"], ["I got a jury summons"]])
       assert.equal((await at(setup, "before you say goodbye, I also got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?", setup.join(" / "));
+  } finally { await mcp.close(); }
+});
+
+test("dialog: 'thanks, please don't hang up' keeps the open question; a no comes first at the explain and text offers; every carried letter is named", async () => {
+  const mcp = await startMcp();
+  try {
+    const END = "This is general information, not legal advice. Goodbye.";
+    const at = async (setup, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t);
+      const r = await d.handle(reply); return { ...r, d }; };
+    const SIXTY = ["I got a 3 day notice dated September 28, I also got a 60 day notice to move out"];
+    // A stay request with no answer in it keeps what was open (letter, date, carry, stage) and asks its question again;
+    // "I'm still here" only when nothing is open. (At the stop offer it is a no to stopping: the date question.)
+    const STAGES = [
+      [["I got a 30 day notice"], "date", "What day was the notice handed to you? You can say something like September 13th."],
+      [["I got a summons"], "letter", "Is it about an eviction, a lawsuit about money, or jury duty?"],
+      [["I got a 30 day notice", "no", "no"], "date", "What day was the notice handed to you? You can say something like September 13th."],
+      [["I got a 3 day notice dated September 28"], "more", "Want me to explain how I counted?"],
+      [["I got a 3 day notice dated September 28", "yes"], "text", "Would you like me to text you the date?"],
+      [SIXTY, "more", "Want me to explain how I counted?"],
+      [[...SIXTY, "yes"], "text", "Would you like me to text you the date?"],
+      [["I got a jury summons, plus a notice of trustee's sale"], "another", "Want me to go on to it?"],
+      [["I got a jury summons, I also got a 60 day notice to move out"], "another", "What date is on it?"],
+      [["I got a jury summons"], "another", "Do you have another letter I can help with?"],
+    ];
+    for (const [setup, stage, ask] of STAGES) for (const reply of ["thanks, please don't hang up", "thanks, hold on", "thank you, please don\u2019t hang up"]) {
+      const before = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await before.handle(t);
+      const { letter, date, carry } = before;
+      const r = await before.handle(reply);
+      assert.deepEqual([r.say, r.done, before.awaiting], [`Okay. ${ask}`, false, stage], `${setup.join(" / ")} → ${reply}`);
+      if (stage !== "date" || setup.length === 1) assert.deepEqual([before.letter, before.date, before.carry], [letter, date, carry], `${setup.join(" / ")} → ${reply}`);
+    }
+    // …and what was open is still answerable: the carried sale is taken up, the date is read.
+    const kept = await at(["I got a jury summons, plus a notice of trustee's sale", "thanks, please don't hang up"], "yes");
+    assert.match(kept.say, /^A Notice of Trustee's Sale prints the date/);
+    assert.match((await at(["I got a 30 day notice", "thanks, please don't hang up"], "September 25")).say, /^A 30-day notice can't end your tenancy before Sunday, October 25, 2026/);
+    // At the date question, with or without thanks and words after it: the letter is kept, so the date is read for it.
+    for (const reply of ["thanks, don't hang up", "thank you, don't hang up, I'm looking for it", "okay thanks, don't hang up, let me find it", "hold on, don't hang up", "wait, don't hang up"]) {
+      const r = await at(["I got a 30 day notice", reply], "September 25");
+      assert.match(r.say, /^A 30-day notice can't end your tenancy before Sunday, October 25, 2026/, reply);
+    }
+    // A stay that leaves a goodbye behind isn't one ("don't hang up, bye"), and "never mind hang up" (no comma, as ASR
+    // writes it) is a goodbye like "never mind, hang up".
+    for (const setup of [["I got a 30 day notice"], ["I got a 3 day notice dated September 28"], ["I got a jury summons, plus a notice of trustee's sale"], ["I got a jury summons"]])
+      for (const reply of ["never mind hang up", "never mind, hang up", "don't hang up, bye"])
+        assert.equal((await at(setup, reply)).done, true, `${setup.join(" / ")} → ${reply}`);
+    // "Please stay on the line" isn't a yes: the open question again.
+    assert.equal((await at(["I got a 3 day notice dated September 28"], "please stay on the line")).say, "Okay. Want me to explain how I counted?");
+    assert.equal((await at(["I got a jury summons, plus a notice of trustee's sale"], "please stay on the line")).say, "Okay. Want me to go on to it?");
+    // The date question's "no" count is kept too: a second "no" after the stay request offers to stop.
+    assert.equal((await at(["I got a 30 day notice", "no", "thanks, please don't hang up"], "no")).say, "If you find the date, call back right away: some of these run out in days. Do you want to stop here?");
+    assert.equal((await at([], "thanks, please don't hang up")).say, "Okay. I'm still here: tell me about another letter, or say goodbye when you're done.");
+    // A bare "don't hang up", "stay on the line please" or "please don\u2019t hang up" ends the call at no stage, changes
+    // nothing, and asks the open question again (at the stop offer: the date, a no to stopping).
+    for (const [setup, stage, ask] of STAGES) for (const reply of ["don't hang up", "stay on the line please", "please don\u2019t hang up", "hold the line"]) {
+      const r = await at(setup, reply);
+      assert.deepEqual([r.say, r.done, r.d.awaiting], [`Okay. ${ask}`, false, stage], `${setup.join(" / ")} → ${reply}`);
+    }
+    // A stay said with something else in it is read for that: the date, or a letter named.
+    assert.match((await at(["I got a 30 day notice"], "hold on, it was September 25")).say, /^A 30-day notice can't end your tenancy before Sunday, October 25, 2026/);
+    // The curly apostrophe is read as the plain one: "yes, please don\u2019t hang up" is a yes.
+    assert.match((await at(["I got a 3 day notice dated September 28"], "yes, please don\u2019t hang up")).say, /^Here's how I counted\..* Would you like me to text you the date\?$/);
+    // "Before you hang up" isn't a stay: "before you hang up, thanks, goodbye" ends the call; "before you say goodbye, I also
+    // got a summons" still names a letter (the decoder), so it is the summons question.
+    for (const setup of [["I got a 30 day notice"], ["I got a 3 day notice dated September 28"], ["I got a jury summons"]]) {
+      for (const reply of ["before you hang up, thanks, goodbye", "before you hang up, thanks so much"]) assert.equal((await at(setup, reply)).done, true, `${setup.join(" / ")} → ${reply}`);
+      assert.equal((await at(setup, "before you say goodbye, I also got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?", setup.join(" / "));
+    }
+    // At the explain and text offers a no comes first, as at the go-on offer: "okay, no thank you, goodbye" neither explains
+    // nor texts; it ends, naming a letter carried. A no that asks how ("no, how did you count it?") still explains.
+    const LINE60 = "You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. ";
+    for (const [setup, line] of [[["I got a 3 day notice dated September 28"], ""], [["I got a 3 day notice dated September 28", "yes"], ""], [SIXTY, LINE60], [[...SIXTY, "yes"], LINE60]])
+      for (const reply of ["okay, no thank you, goodbye", "yes, no thanks, bye"])
+        assert.deepEqual([(await at(setup, reply)).say, (await at(setup, reply)).done], [`Okay. ${line}${END}`, true], `${setup.join(" / ")} → ${reply}`);
+    assert.match((await at(SIXTY, "okay, no thanks")).say, /^Okay\. Now, about a 60-day notice to move out\./);
+    assert.match((await at(["I got a 3 day notice dated September 28"], "no, how did you count it?")).say, /^Here's how I counted\./);
+    assert.match((await at(["I got a 3 day notice dated September 28"], "no, okay go ahead")).say, /^Here's how I counted\..* Would you like me to text you the date\?$/);
+    // A goodbye after an answer names every letter carried: an undated first one "Don't put off …", then the rest.
+    const pair = new Dialog(mcp.callTool, { today: "2026-09-30" }); await pair.handle("I got a 3 day notice dated September 28");
+    pair.carry = ["jury-summons", "ca-60day-notice"];
+    assert.equal((await pair.handle("bye")).say, `Okay. Don't put off dealing with the jury summons. Call back if you'd like to go over it, or look for free legal help. ${LINE60}${END}`);
+    const two = new Dialog(mcp.callTool, { today: "2026-09-30" }); await two.handle("I got a 3 day notice dated September 28");
+    two.carry = ["jury-summons", "ca-60day-notice", "ca-foreclosure-nod"];
+    assert.match((await two.handle("bye")).say, /^Okay\. Don't put off dealing with the jury summons\. .*You also mentioned the 60-day notice to move out and the Notice of Default: call back right away about them, or look for free legal help\. /);
+    // The sale's cutoff is said whenever the sale is carried, first or not.
+    const saleSecond = new Dialog(mcp.callTool, { today: "2026-09-30" }); await saleSecond.handle("I got a 3 day notice dated September 28");
+    saleSecond.carry = ["jury-summons", "ca-foreclosure-sale"];
+    assert.equal((await saleSecond.handle("bye")).say, `Okay. Don't put off dealing with the jury summons. Call back if you'd like to go over it, or look for free legal help. You also mentioned the Notice of Trustee's Sale: call back right away about it, or look for free legal help. For the Notice of Trustee's Sale: if you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. ${END}`);
+    const goOnTwo = new Dialog(mcp.callTool, { today: "2026-09-30" }); Object.assign(goOnTwo, { letter: "jury-summons", awaiting: "another", carry: ["ca-foreclosure-nod", "ca-foreclosure-sale"] });
+    assert.match((await goOnTwo.handle("no thanks")).say, /^Okay\. Don't put off dealing with the Notice of Default\. .*You also mentioned the Notice of Trustee's Sale: .*For the Notice of Trustee's Sale: if you want to catch up on the loan, the cutoff is generally five business days before the sale date/);
+    // "I don't want to hang up" / "I don't need you to hang up" ask the line to stay: a carried letter is taken up, not dropped.
+    for (const reply of ["no, I don't want to hang up", "no, I don't need you to hang up"]) {
+      const r = await at(SIXTY, reply);
+      assert.equal(r.done, false, reply); assert.match(r.say, /^Okay\. Now, about a 60-day notice to move out\./, reply);
+    }
+    assert.equal((await at(["I got a 3 day notice dated September 28"], "I don't want to hang up")).done, false);
+    const undated2 = new Dialog(mcp.callTool, { today: "2026-09-30" }); await undated2.handle("I got a 3 day notice dated September 28");
+    undated2.carry = ["jury-summons", "ca-foreclosure-nod"];
+    assert.match((await undated2.handle("bye")).say, /You also mentioned the Notice of Default: call back right away about it, or look for free legal help\. /);
   } finally { await mcp.close(); }
 });
 
