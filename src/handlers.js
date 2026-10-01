@@ -49,7 +49,7 @@ export function cleanState(s) {
   const letter = LETTERS.has(s.letter) ? s.letter : null;
   const date = typeof s.date === "string" && ISO_DATE.test(s.date) ? s.date : null;
   let awaiting = AWAITING.has(s.awaiting) ? s.awaiting : null;
-  if (awaiting === "more" && !(letter && date)) awaiting = null;     // "how did you count?" needs a deadline
+  if ((awaiting === "more" || awaiting === "text") && !(letter && date)) awaiting = null;   // both read the deadline
   const candidates = Array.isArray(s.candidates) ? [...new Set(s.candidates.filter(c => LETTERS.has(c)))].slice(0, 5) : [];
   const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)

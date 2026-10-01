@@ -91,11 +91,12 @@ export class Dialog {
       return this.date ? `Got the date. ${UNKNOWN_LETTER}` : `${UNKNOWN_LETTER} And what date is on it?`;
     }
     if (awaiting === "text" && this.result) return `Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`;
-    if ((awaiting === "more" || awaiting === "another") && letter) {
+    // Only a letter that can be answered: one with its date, or one that has no date to ask for.
+    if ((awaiting === "more" || awaiting === "another") && letter && (this.date || RULES.find(r => r.id === letter)?.anchor === null)) {
       // The answer again, from a copy (answering changes what's carried and said once). It includes the HOA step when the
       // step was said for this letter (hoaSaid, a validated boolean).
       const copy = Object.assign(new Dialog(this.call, { today: this.today }), { letter, date: this.date, carry: [...this.carry], hoa: this.hoaSaid });
-      return (await copy.answer()).say;
+      return (await copy.answer()).say ?? GREETING;
     }
     return GREETING;
   }

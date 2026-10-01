@@ -131,6 +131,18 @@ test("api/decode: a 'last' or 'dateQuestion' the page sends is never spoken; the
   assert.equal(asked[1].say, asked[0].say);
 });
 
+test("api/decode: a tampered stage without the date it needs gets the greeting, not an error", T, async () => {
+  const post = async (transcript, state) => decodeApi.POST(req("/api/decode", { body: { transcript, state, today: "2026-09-30" } }));
+  for (const state of [{ awaiting: "another", letter: "ca-3day" }, { awaiting: "text", letter: "ca-3day" }]) {
+    const r = await post("say that again", state);
+    assert.equal(r.status, 200, JSON.stringify(state)); assert.equal((await r.json()).say, GREETING, JSON.stringify(state));
+  }
+  const yes = await post("yes", { awaiting: "text", letter: "ca-3day" });
+  assert.equal(yes.status, 200); assert.match((await yes.json()).say, /^I still need the date on the letter\./);
+  // A letter with no date to ask for still repeats its answer at "another".
+  assert.match((await (await post("say that again", { awaiting: "another", letter: "ca-foreclosure-nod" })).json()).say, /^A Notice of Default starts the foreclosure clock/);
+});
+
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
     { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [] });
