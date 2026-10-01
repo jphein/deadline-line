@@ -92,8 +92,9 @@ export class Dialog {
     }
     if (awaiting === "text" && this.result) return `Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`;
     if ((awaiting === "more" || awaiting === "another") && letter) {
-      // The answer again, from a copy (answering changes what's carried and said once).
-      const copy = Object.assign(new Dialog(this.call, { today: this.today }), { letter, date: this.date, carry: [...this.carry] });
+      // The answer again, from a copy (answering changes what's carried and said once). It includes the HOA step when the
+      // step was said for this letter (hoaSaid, a validated boolean).
+      const copy = Object.assign(new Dialog(this.call, { today: this.today }), { letter, date: this.date, carry: [...this.carry], hoa: this.hoaSaid });
       return (await copy.answer()).say;
     }
     return GREETING;

@@ -53,8 +53,8 @@ export function cleanState(s) {
   const candidates = Array.isArray(s.candidates) ? [...new Set(s.candidates.filter(c => LETTERS.has(c)))].slice(0, 5) : [];
   const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)
-  // The carried letters: real ids only, at most three. Nothing the page sends is spoken: what's said about them is
-  // rebuilt on the server from these ids (a carrySpoken in the state is dropped).
+  // The carried letters: real ids only, at most three. No sentence the page sends is spoken: its ids, dates and flags
+  // only select the server's own text (a carrySpoken in the state is dropped).
   const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt by Dialog.restore() from the letter and the stage.
   return { letter, date, awaiting, candidates, hoa, hoaSaid, carry };

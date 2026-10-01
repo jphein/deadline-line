@@ -114,11 +114,19 @@ test("api/decode: a 'last' or 'dateQuestion' the page sends is never spoken; the
   assert.equal(turns[1].say, turns[0].say);
   const counted = await converse(decodeApi.POST, ["I got a 3 day notice dated September 28", "yes", "say that again"], "2026-09-30");
   assert.match(counted[1].say, /^Here's how I counted\./); assert.equal(counted[2].say, counted[1].say);
-  // Accepted difference: through the page, a repeat after an answer is the answer rebuilt from validated fields, so a
-  // step said once (the HOA redemption step) isn't said again; the phone line, which keeps the conversation, repeats it.
+  // A repeat after an answer is the answer rebuilt from validated fields; it includes the HOA step exactly when the step
+  // was said for this letter (hoaSaid).
+  const STEP = /If your homeowners association is foreclosing/;
   const hoa = await converse(decodeApi.POST, ["my HOA sent a notice of default", "say that again"], "2026-09-30");
-  assert.match(hoa[0].say, /If your homeowners association is foreclosing/); assert.doesNotMatch(hoa[1].say, /If your homeowners association is foreclosing/);
-  assert.match(hoa[1].say, /^A Notice of Default starts the foreclosure clock/);
+  assert.match(hoa[0].say, STEP); assert.equal(hoa[1].say, hoa[0].say);
+  const plain = await converse(decodeApi.POST, ["I got a notice of default on my house", "say that again"], "2026-09-30");
+  assert.doesNotMatch(plain[1].say, STEP); assert.equal(plain[1].say, plain[0].say);
+  // Content-faithful, not verbatim: when the step was said in its own turn ("it's from my HOA" after the answer), the
+  // repeat is the whole answer with the step in it, not that turn's words. A verbatim replay would need a new stage
+  // field in the page's state, which this doesn't add.
+  const later = await converse(decodeApi.POST, ["I got a notice of default on my house", "it's from my HOA", "say that again"], "2026-09-30");
+  assert.match(later[1].say, /^If your homeowners association is foreclosing/);
+  assert.match(later[2].say, /^A Notice of Default starts the foreclosure clock/); assert.match(later[2].say, STEP);
   const asked = await converse(decodeApi.POST, ["I got a summons", "say that again"], "2026-09-30");
   assert.equal(asked[1].say, asked[0].say);
 });
