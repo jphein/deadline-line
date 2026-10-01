@@ -114,6 +114,11 @@ test("api/decode: a 'last' or 'dateQuestion' the page sends is never spoken; the
   assert.equal(turns[1].say, turns[0].say);
   const counted = await converse(decodeApi.POST, ["I got a 3 day notice dated September 28", "yes", "say that again"], "2026-09-30");
   assert.match(counted[1].say, /^Here's how I counted\./); assert.equal(counted[2].say, counted[1].say);
+  // Accepted difference: through the page, a repeat after an answer is the answer rebuilt from validated fields, so a
+  // step said once (the HOA redemption step) isn't said again; the phone line, which keeps the conversation, repeats it.
+  const hoa = await converse(decodeApi.POST, ["my HOA sent a notice of default", "say that again"], "2026-09-30");
+  assert.match(hoa[0].say, /If your homeowners association is foreclosing/); assert.doesNotMatch(hoa[1].say, /If your homeowners association is foreclosing/);
+  assert.match(hoa[1].say, /^A Notice of Default starts the foreclosure clock/);
   const asked = await converse(decodeApi.POST, ["I got a summons", "say that again"], "2026-09-30");
   assert.equal(asked[1].say, asked[0].say);
 });
