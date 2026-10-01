@@ -709,6 +709,17 @@ test("dialog: a yes, no or goodbye that names a letter is about that letter, at 
     }
     const hoaUd = await at(["I got a notice of default on my house"], "my HOA is foreclosing, and I also got an unlawful detainer");
     assert.equal(hoaUd.letter, "ca-ud"); assert.doesNotMatch(hoaUd.say, /^If your homeowners association/);
+    // An HOA mention with another letter in the same breath, after a notice of default or a trustee's sale was answered,
+    // or after the HOA step: that letter is taken up (the HOA step isn't also said in that turn). Naming the letter just
+    // answered isn't another letter: "it's from my HOA, it's the notice of default" still gets the step.
+    const STEP = /^If your homeowners association is foreclosing/;
+    for (const setup of [["I got a notice of default on my house"], ["I got a notice of default on my house", "it's from my HOA"], ["I got a notice of trustee's sale"]])
+      for (const [reply, letter] of [["it's from my HOA, and I also got an unlawful detainer", "ca-ud"], ["my HOA sent it, and a CP2000 from the IRS too", "irs-cp2000"]]) {
+        const r = await at(setup, reply);
+        assert.equal(r.letter, letter, `${setup.join(" / ")} → ${reply}`); assert.doesNotMatch(r.say, STEP);
+      }
+    assert.match((await at(["I got a notice of default on my house"], "it's from my HOA")).say, STEP);
+    assert.match((await at(["I got a notice of default on my house"], "it's from my HOA, it's the notice of default")).say, STEP);
     // A failed detection names nothing: a plain "no" or "yes" is answered as before, not an error.
     const failingOnce = (reply) => { let failed = false; return async (name, args) => {
       if (name === "detect_letter" && args.text === reply && !failed) { failed = true; throw new Error("engine down"); }
@@ -720,6 +731,22 @@ test("dialog: a yes, no or goodbye that names a letter is about that letter, at 
     const stop = new Dialog(failingOnce("yes"), { today: "2026-09-30" });
     for (const t of ["I got a 30 day notice", "no", "no"]) await stop.handle(t);
     assert.equal((await stop.handle("yes")).done, true);
+    // Every way the first detection of a terminal turn can fail (a throw, a DecoderError, nothing returned): the plain
+    // answer, as before, at "more", "text", "stop" and the date question.
+    const { DecoderError } = await import("../vendor/deadline-decoder-mcp/src/decoder.js");
+    const failFirst = (mode) => { let done = false; return async (name, args) => {
+      if (name === "detect_letter" && !done) { done = true; if (mode === "throw") throw new Error("engine down"); if (mode === "decoder") throw new DecoderError("engine failed"); return undefined; }
+      return mcp.callTool(name, args);
+    }; };
+    for (const mode of ["throw", "decoder", "undefined"])
+      for (const [setup, reply, check] of [
+        [MORE, "yes", (a) => assert.match(a.say, /^Here's how I counted\./)], [TEXT, "no", (a) => assert.equal(a.done, true)],
+        [STOP, "bye", (a) => assert.equal(a.done, true)], [["I got a 3 day notice"], "no", (a) => assert.match(a.say, /^I still need the date on the letter\./)]]) {
+        const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+        for (const t of setup) await d.handle(t);
+        d.call = failFirst(mode);
+        check(await d.handle(reply));
+      }
     // Right after an answer, the letter just answered isn't a new one: these keep their plain meaning.
     for (const [setup, reply, want] of [
       [MORE, "yes, how did you count the 3 day notice", (r) => assert.match(r.say, /^Here's how I counted\./)],

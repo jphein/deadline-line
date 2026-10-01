@@ -147,7 +147,7 @@ export class Dialog {
       if (NO.test(t) || BYE.test(t)) return this.goodbye();
     }
     // "It's from my HOA", said after a notice of default or a trustee's sale was answered: the redemption right, once.
-    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !(await this.namesLetter(t))) {
+    if ((this.awaiting === "another" || this.awaiting === "more") && HOA_LETTERS.has(this.letter) && HOA.test(t) && !(await this.namesLetter(t, this.letter))) {
       const r = this.result ?? await this.compute();
       const step = r.next_steps.find(s => HOA_STEP.test(s));
       const ask = this.awaiting === "more" ? "Want me to explain how I counted?" : "Do you have another letter I can help with?";
