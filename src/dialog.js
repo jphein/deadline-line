@@ -147,6 +147,11 @@ export class Dialog {
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
       if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();
       const carry = this.carry;
+      // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
+      if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !LETTERISH.test(t)) {
+        if (YES.test(t)) return this.startCarry("");
+        if (NO.test(t)) return this.goodbye();
+      }
       if (!carry.length && NO.test(t) && !LETTERISH.test(t)) return this.goodbye();
       this.reset();
       // The letter the caller also named: this turn is about it (its date, or just "okay").
@@ -210,7 +215,9 @@ export class Dialog {
         : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
     // What's said about a carried letter is built here, from its id: never a sentence the page sent back.
     const carried = this.carry.length ? `${await this.carryLine()} ` : "";
-    const next = carried + (counted ? "Want me to explain how I counted?" : this.carry.length ? "What date is on it?" : "Do you have another letter I can help with?");
+    const undated = this.carry.length && (await this.letterInfo(this.carry[0])).needs_date === false;
+    const next = carried + (counted ? "Want me to explain how I counted?" : !this.carry.length ? "Do you have another letter I can help with?"
+      : undated ? "Want me to go on to it?" : "What date is on it?");
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
     // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).

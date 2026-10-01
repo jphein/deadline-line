@@ -597,6 +597,12 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     assert.equal(jury[1].letter, "ca-60day-notice");
     const bye = await run(["I got a jury summons, I also got a 60 day notice to move out", "goodbye"]);
     assert.equal(bye[1].done, true);
+    // A carried letter with no date to ask for, after a first answer with nothing to count: offered, not asked a date.
+    const go = await run(["I got a jury summons, plus a notice of default", "yes"]);
+    assert.match(go[0].say, /tell me about that next\. Want me to go on to it\?$/); assert.doesNotMatch(go[0].say, /What date is on it/);
+    assert.equal(go[1].letter, "ca-foreclosure-nod"); assert.match(go[1].say, /^A Notice of Default starts the foreclosure clock/);
+    const stop = await run(["I got a jury summons, plus a notice of default", "no"]);
+    assert.equal(stop[1].done, true);
     // A carried letter with no date to ask for is answered when it's reached.
     const nod = await run(["social security denied my disability, I also got a notice of default", "September 20", "yes", "no"]);
     assert.match(nod[1].say, /You also mentioned a Notice of Default on your home loan/);
