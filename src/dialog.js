@@ -241,7 +241,7 @@ export class Dialog {
   async letterInfo(id) {
     const all = (this.types ??= (await this.call("list_letter_types", {})).letter_types);
     const t = all.find(x => x.id === id) ?? { title: "other letter", needs_date: true };
-    return { ...t, short: t.title.replace(/^California: /, "") };
+    return { ...t, short: t.carry_title ?? t.title.replace(/^California: /, "") };   // the engine's short spoken name
   }
 
   /** "You also mentioned …; tell me about that next.", from the carried ids and the engine's titles. */

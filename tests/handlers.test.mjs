@@ -97,7 +97,7 @@ test("api/decode: a carrySpoken the page sends is never spoken; the carried lett
     const j = await r.json();
     assert.ok(!j.say.includes(injected), injected);
     assert.doesNotMatch(j.say, /gift card|555-0100|<script>/);
-    assert.match(j.say, / You also mentioned court papers for a lawsuit \(a Summons that isn't about an eviction\); tell me about that next\. Want me to explain how I counted\?$/);
+    assert.match(j.say, / You also mentioned court papers for a lawsuit; tell me about that next\. Want me to explain how I counted\?$/);
     assert.equal("carrySpoken" in j.state, false);
   }
 });
