@@ -1,4 +1,4 @@
-// Vendored from jphein/deadline-decoder-mcp (develop @ 35d0ebfe2197041295f2ad729826c733fe295c14), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ a960445b16f738ad759e0f8f003a76d1d0037b0b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // rules.js — one entry per kind of letter. Every rule cites its source, and every result shows its
@@ -281,7 +281,7 @@ export const RULES = [
     unhedge: true,              // nor is it a summons
     detect: [/\bsummons\b|citaci[oó]n judicial/i, /\b(complaint|plaintiff|demandante)\b/i, /\b(30|thirty) (calendar )?days\b/i],
     not: /unlawful detainer|eviction|desalojo/i,
-    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b/i,
+    spoken: /\b(su(ed|ing) me|being sued|lawsuit|debt collector|collection agency|credit card company)\b.*\b(summons|papers|court)\b|\b(summons|court papers)\b.*\b(debt|money|owe|credit card|collection|lawsuit|sued|suing)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\bserved (me |you )?with (court |legal )?papers\b.*\b(debt|collect\w*|credit card)\b|\bcollections?\b.*\b(summons|court papers)\b|^(?!.*\b(landlord|rent|evict\w*|lease)\b).*\b(debt collector|collection agency|collections?|credit card company)\b.{0,40}(?<!\b(may|might|could) have )\b(sued|is suing|are suing) me\b/i,
     answers: /\b(money|debt|owe|lawsuit|sued|suing|collect\w*|credit card|loan|bill)\b/i,
     keyterms: ["summons", "complaint", "lawsuit", "debt collector"],
     headline: "File a written response with the court",
@@ -827,7 +827,7 @@ export const RULES = [
     // (the IRS, FTB, EDD, Social Security, child support, a county or court): the validation rules cover debt collectors.
     // An actual suit (being sued, papers, a summons), not the boilerplate a validation notice carries ("if you are sued",
     // "we will not sue you", "the law limits how long you can be sued", "may be eligible for small claims").
-    not: /\b((sued|sues|suing|took|taking|filed) me\b|filed (a|the) (suit|lawsuit|case)|summons|court papers|(a|the) complaint (was |has been )?filed|complaint against you|served (me |you )?with|(been|got) served|served papers|small claims (papers|court papers|claim|case|hearing)|plaintiff'?s claim|SC-100)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court (fines?|fees?|costs)|trash|garbage|recycling)\b/i,
+    not: /\b((sued|sues|suing|took|taking|filed) me\b|filed (a|the) (suit|lawsuit|case)|summons|court papers|(a|the) complaint (was |has been )?filed|complaint against you|served (me |you )?with|(been|got) served|served papers|small claims (papers|court papers|claim|case|hearing)|plaintiff'?s claim|SC-?100)\b|\b(IRS|internal revenue|FTB|franchise tax|EDD|employment development|social security|SSA|SSI|child support|county|court (fines?|fees?|costs)|trash|garbage|recycling)\b/i,
     detect: [/debt collect\w*|collection agency|collector/i, /validation|dispute|verif\w*/i, /\b(owe|balance|creditor|debt)\b/i],
     spoken: /^(?!.*\b((sued|suing) me|filed (a|the) (suit|lawsuit|case)|summons|court papers)\b).*(debt collect\w*|collection agency|\b(sent|went|gone|turned over) (\w+ ){0,3}to collections\b|\bcollections? (letter|notice|agency|company)\b|validation notice)/is,
     answers: /\b(collect\w*|collector|debt)\b/i,
@@ -999,7 +999,7 @@ export const RULES = [
     // it's a landlord suing for back rent or a deposit with no eviction word.
     not: /\b(want(ed)? to sue|I('m| am)? (going to )?sue|I('m| am) suing|I sued|file (a|my) (small claims|claim)|I won(?!['’]t)|collect (my|the|on (a|my|the)) judgment)\b|(\b(might|may|could|will|going to|threaten\w*)\b|['’]ll\b).{0,20}\b(take me to|sue me)\b|\b(unlawful detainer|UD)\b|^(?!.*\b(back rent|security deposit)\b).*\bevict\w*/is,
     detect: [/small claims/i, /plaintiff'?s claim|SC-100|order to go to/i, /hearing|court date|trial date|defendant/i],
-    spoken: /small claims/i,
+    spoken: /small claims|\bSC-?100\b/i,
     answers: /\bsmall claims\b/i,
     keyterms: ["small claims", "Plaintiff's Claim", "SC-100"],
     headline: "Go to the hearing on that date, with your witnesses and documents",
@@ -1157,6 +1157,12 @@ export const AMBIGUOUS = [
     // heard back"): those are past the hearing.
     answers: [["ssa-recon", /^(?!.*\b(ruled|lost|against me|said no|turned (me )?down|(?<!(haven'?t|have not|hasn'?t|has not|didn'?t|not yet) )(had (it|my hearing|the hearing)|went)|heard back|the decision)\b)(\W*(no|nope|not yet)\b|.*\b(not yet|haven'?t|have not|hasn'?t|has not|scheduled|set for|coming( up)?|waiting|next (week|month))\b)/is],
               ["ssa-appeals-council", /^\W*(yes|yeah|yep|i did)\b|\b(already|had it|had (my|the) hearing|went to (it|the hearing|my hearing)|the judge|lost|ruled|it was|heard back|went|the decision)\b/i]] },
+  // "The debt collector says you may have been served already with a lawsuit.": a lawsuit, or still just the letter?
+  { spoken: /\b(may|might|could) have (been )?(served|sued)\b/i, candidates: ["ca-civil-summons", "debt-validation"],
+    question: "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?",
+    // Its own answers, in order: court papers first ("I got a summons"), then the letter ("just the letter").
+    answers: [["ca-civil-summons", /^(?!.*\bno (court )?papers\b).*\b(court papers|papers|summons|lawsuit|sued|court)\b/i],
+      ["debt-validation", /\b(letter|notice|collector|just|only|not yet|no)\b/i]] },
   { spoken: /\bsummons\b|\bcourt papers\b/i, candidates: ["ca-ud", "ca-civil-summons", "jury-summons"],
     question: "Is it about an eviction, a lawsuit about money, or jury duty?" },
   { spoken: /notice to (vacate|move out|terminate)|terminat\w* (of )?(my |the )?tenancy|move[- ]out notice|telling me to move out/i, candidates: ["ca-30day-notice", "ca-60day-notice"],
@@ -1172,18 +1178,28 @@ export const KEYTERMS = [...new Set(RULES.flatMap(r => r.keyterms ?? []))];
 // pay, you may be served with a lawsuit.", "We have not filed a lawsuit against you." For the rules that ask "is this a
 // suit?", the hedged phrase is blanked: from a hedge word within 20 characters before a suit word ("no" only right
 // before it: "no lawsuit has been filed", not "no idea what this summons means"), through at most three more words
-// of that phrase ("with a lawsuit", "against you"). The phrase stops at and/but/was/were/has/have/yesterday and at a
+// of that phrase ("with a lawsuit", "against you"). The phrase stops at and/but/was/were/has/have/will/shall/yesterday and at a
 // new suit noun that no preposition ties to it, so a real suit after the hypothetical stays: "…you may be served with
 // a lawsuit you got a summons yesterday…", "…WITH A LAWSUIT A SUMMONS AND COMPLAINT WAS FILED…". Never in a sentence
 // in the caller's own words ("I don't know if the summons is real"): notices say "you" and "we", callers say "I".
 // ("before" isn't a hedge: "Before you were served with this summons, …" is a real one.)
 const SUIT = "summons|complaint|lawsuit|court papers|suit|sued?|suing|served";
 const DET = "(?:(?:a|an|the|this|any)\\s+)?";
-const PHRASE_WORD = `\\s+(?:(?:with|of|against|to)\\s+${DET}\\w+|(?!(?:and|but|yesterday|was|were|has|have)\\b)${DET}(?!(?:${SUIT})\\b)\\w+)`;
-const HEDGE_SUIT = new RegExp(`(?:\\b(?:if|may|might|could|would|not|never|unless)\\b[^.;!?,]{0,20}?|\\bno (?:\\w+ )?)\\b(?:${SUIT})\\b(?:${PHRASE_WORD}){0,3}`, "gi");
+const PHRASE_WORD = `\\s+(?:(?:with|of|against|to)\\s+${DET}\\w+|(?!(?:and|but|yesterday|was|were|has|have|will|shall)\\b)${DET}(?!(?:${SUIT})\\b)\\w+)`;
+// "may have been served" is a past maybe, not a hypothetical: it isn't blanked (the line asks; see AMBIGUOUS).
+// Careful: a hedged phrase longer than three words leaves its last words unblanked ("If you do not pay within 30 days
+// of this notice we may file a lawsuit against you in the superior court of California" → "…we   court of
+// California"), so no rule may route on "court" plus a collector word alone.
+const hedgeSuit = (hedges) => new RegExp(`(?:\\b(?:${hedges})\\b(?!\\s+have been\\b)[^.;!?,]{0,20}?|\\bno (?:\\w+ )?)\\b(?:${SUIT})\\b(?:${PHRASE_WORD}){0,3}`, "gi");
+const HEDGE_SUIT = hedgeSuit("if|may|might|could|would|not|never|unless");
+// In a sentence that opens with "If", its consequence is hypothetical too: "If you are sued you will be served with a
+// summons and complaint.", "If you are sued by us in court the summons will tell you how to respond."
+const IF_SUIT = hedgeSuit("if|may|might|could|would|not|never|unless|will|shall");
+const SUIT_WILL = new RegExp(`\\b(?:${SUIT})\\b(?=\\s+(?:will|shall)\\b)`, "gi");
 const FIRST_PERSON = /\b(I|me|my|I'm|I've)\b/i;
 export function unhedged(text) {
-  return text.replace(/[^.;!?]+/g, (sentence) => FIRST_PERSON.test(sentence) ? sentence : sentence.replace(HEDGE_SUIT, " "));
+  return text.replace(/[^.;!?]+/g, (sentence) => FIRST_PERSON.test(sentence) ? sentence
+    : /^\s*if\b/i.test(sentence) ? sentence.replace(IF_SUIT, " ").replace(SUIT_WILL, " ") : sentence.replace(HEDGE_SUIT, " "));
 }
 export const textFor = (r, text) => r.unhedge ? unhedged(text) : text;
 

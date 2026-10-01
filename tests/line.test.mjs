@@ -436,12 +436,18 @@ test("dialog: the HOA step only for an HOA by name, not a lender's notice, and o
     }
     // "Hoa" is a given name, not an HOA; the acronym is.
     for (const x of ["my friend Hoa helped me read the notice of default on my house", "Hoa is my name, I got a notice of default",
-      "my friend Hoa sent me a photo of my notice of default"]) {
+      "my friend Hoa sent me a photo of my notice of default",
+      // Opening the sentence, but not sending the notice itself: the name.
+      "Hoa sent me a text about the notice of default on my house", "Hoa gave me a ride to court, I got a notice of default",
+      "Hoa mailed me a copy of my notice of default", "Hoa filed my papers, I have a notice of default on my house",
+      "Hoa sent me my bank's notice of default", "Hoa sent me a photo of the notice of default, she's my sister",
+      "Hoa sent me my notice of default from the mailbox"]) {
       const [d, a] = await run([x]); assert.equal(d.letter, "ca-foreclosure-nod", x); assert.equal(times(a), 0, x);
     }
     for (const x of ["my HOA sent a notice of default", "my hoa sent a notice of default",
       // ASR's own output for a spoken "hoa" opening the sentence (measured, AssemblyAI streaming).
-      "Hoa sent me the Notice of Default.", "I got a notice of default. Hoa is foreclosing on my condo."]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
+      "Hoa sent me the Notice of Default.", "I got a notice of default. Hoa is foreclosing on my condo.",
+      "Hoa mailed a notice of default to my house", "Hoa sent us a notice of trustee's sale"]) { const [, a] = await run([x]); assert.equal(times(a), 1, x); }
     // Said once per letter: a repeated "it's from my HOA", or one after the step was already in the answer.
     const said = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); let n = 0; for (const t of turns) n += times(await d.handle(t)); return n; };
     assert.equal(await said(["I got a notice of default on my house", "it's from my HOA", "it's from my HOA"]), 1);
@@ -499,6 +505,20 @@ test("dialog: a validation notice's 'If you receive a summons' line gets the val
     const summons = new Dialog(mcp.callTool, { today: "2026-09-30" });
     await summons.handle("a debt collector sued me and I got a summons");
     assert.equal(summons.letter, "ca-civil-summons");
+  } finally { await mcp.close(); }
+});
+
+test("dialog: 'may have been served already' is asked about: court papers get the summons answer, a letter the validation answer", async () => {
+  const mcp = await startMcp();
+  try {
+    for (const [answer, want] of [["court papers", "ca-civil-summons"], ["a letter", "debt-validation"]]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      const q = await d.handle("The debt collector says you may have been served already with a lawsuit.");
+      assert.equal(q.say, "Did you get court papers about a lawsuit, like a summons, or a letter from the debt collector?");
+      assert.equal(d.letter, null);
+      await d.handle(answer);
+      assert.equal(d.letter, want, answer);
+    }
   } finally { await mcp.close(); }
 });
 

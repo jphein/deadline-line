@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Vendored from jphein/deadline-decoder-mcp (develop @ 35d0ebfe2197041295f2ad729826c733fe295c14), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
+// Vendored from jphein/deadline-decoder-mcp (develop @ a960445b16f738ad759e0f8f003a76d1d0037b0b), licensed AGPL-3.0-or-later: see vendor/deadline-decoder-mcp/LICENSE.
 // Upstream edits belong upstream: change them there and re-vendor with scripts/vendor-decoder.sh, rather than patch here.
 // server.js — Streamable HTTP MCP endpoint at /mcp (stateless, spec 2025-11-25) plus the web
 // Alexa+ simulator at /. Set HOST=0.0.0.0 and ALLOWED_HOSTS=example.org behind a reverse proxy.

@@ -18,8 +18,9 @@ const LETTERISH = /\b(letter|notice|papers|summons|ticket|citation)\b/i;
 const HOA_ANYCASE = /\b(H\.\s?O\.\s?A\b\.?|homeowners'? association|(condo(minium)?|community|owners'?|property owners'?) association)/i;
 const HOA_CASED = /\b(HOA|hoa|H O A)\b/;
 // ASR sometimes title-cases a spoken "hoa" that opens a sentence ("Hoa sent me the Notice of Default."): only there,
-// and only as the one sending or foreclosing, so the name ("Hoa is my name", "my friend Hoa") still isn't an HOA.
-const HOA_INITIAL = /(^|[.!?]\s+)Hoa (sent|mailed|gave|filed|is (foreclosing|selling|auctioning|suing))\b/;
+// and only as the one sending the notice itself or foreclosing, so the name still isn't an HOA: "Hoa is my name",
+// "Hoa sent me a text about…", "Hoa sent me my bank's notice…", "Hoa filed my papers…".
+const HOA_INITIAL = /(^|[.!?]\s+)Hoa ((sent|mailed|gave|filed)( me| us)?( an?| the)? ([Nn]otice|[Ll]etter|[Ll]ien)\b|is (foreclosing|selling|auctioning)\b)/;
 const HOA = { test: (t) => HOA_ANYCASE.test(t) || HOA_CASED.test(t) || HOA_INITIAL.test(t) };
 // The caller naming a lender on the answering turn means the notice is the lender's, not the HOA's.
 const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i;
