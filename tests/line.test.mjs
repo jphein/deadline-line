@@ -270,6 +270,11 @@ test("web: typed fallback over the WebSocket reaches the dialog", async () => {
     assert.equal(msgs[0].text, GREETING);
     ws.send(JSON.stringify({ type: "text", text: "The county says my CalFresh is stopping, the notice is dated September 1st" }));
     await new Promise(r => setTimeout(r, 400));
+    // Words besides the date that aren't the letter's or plain receipt phrasing ("county", "stopping"): the date is read
+    // back first, and the yes counts from it.
+    assert.ok(msgs.some(m => m.type === "line" && /^Just to check: is the date on .* September 1\? Say yes, or give me the date\.$/.test(m.text)));
+    ws.send(JSON.stringify({ type: "text", text: "yes" }));
+    await new Promise(r => setTimeout(r, 400));
     const ans = msgs.find(m => m.type === "line" && /deadline/.test(m.text));
     assert.match(ans.text, /Monday, November 30, 2026/);
     const wav = await fetch(`http://127.0.0.1:${http.address().port}/tts?text=hello`);
@@ -1245,7 +1250,7 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
     const HELD60 = [...SIXTY, "September 3, thanks"];
     for (const reply of ["I'm not sure", "not sure", "that's not right", "right?", "yes?", "Yes, maybe", "not really", "I don't think so", "I don't know", "probably", "maybe", "no thanks"])
       for (const setup of [CHECKED, [...STOP, "September 3, thanks"], HELD60]) asked(await at(setup, reply), `${setup.length} → ${reply}`);
-    for (const reply of ["sure, I guess", "yeah I think so", "yes, I think so", "that's right", "correct", "yep"]) {
+    for (const reply of ["that's right", "correct", "yep", "yes it was September 3"]) {
       assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
       assert.match((await at(HELD60, reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
     }
@@ -1348,6 +1353,47 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
         const r = await at(setup, reply);
         assert.match(r.say, /^(That deadline was Wednesday, September 9, 2026|Your deadline is Friday, October 2, 2026|A 60-day notice can't end your tenancy before (Monday, November 2|Saturday, November 28), 2026)/, `${setup.join(" / ")} → ${reply}`);
       }
+    // X13: on a letter-naming turn every word is read; a hedge or a denial before the date's clause sends it to the check.
+    const first = async (text) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); return d.handle(text); };
+    for (const text of ["Maybe, I got a 3 day notice on September 3", "I'm not sure, I got a 3 day notice on September 3", "My 3-day notice dated September 3 is wrong"])
+      assert.match((await first(text)).say, /^(Just to check: was the 3-day notice handed to you on September 3\?|I still need the date|Got it: California: a 3-day notice)/, text);
+    assert.match((await first("I got a 3 day notice on September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    assert.match((await first("I got a letter from Social Security dated September 13th, they denied my disability again")).say, /^Your deadline is/);
+    // A hedge before a naming turn's date is read, on a first turn and at the date question.
+    for (const text of ["I'm not sure, my 3 day notice is dated September 3", "I'm not sure. My 3 day notice is dated September 3", "not sure, I got a 3 day notice dated September 3",
+      "maybe, I got a 3 day notice dated September 3", "I got a 3 day notice, it was due September 3"])
+      assert.match((await first(text)).say, /^Just to check: was the 3-day notice handed to you on September 3\?/, text);
+    for (const reply of ["I'm not sure, the 3 day notice is dated September 3", "not sure. the 3 day notice is dated September 3", "maybe, the 3 day notice says September 3",
+      "September 3, September 5", "I got it September 3, the notice says September 1"]) HEARD(await at(DATE, reply), reply);
+    assert.match((await first("I got a 3 day notice to pay rent or quit dated September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    assert.match((await at(DATE, "the 3 day notice is dated September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    assert.match((await at(["they're turning off my water"], "it was due September 3")).say, /^Most water systems can't shut off your water before Monday, November 2, 2026/);
+    // X14: "due" and "printed" are hand-over letters' chat: the check; for a printed-date letter "printed" is plain.
+    for (const reply of ["The notice is due September 3", "The date printed on the notice is September 3"]) for (const setup of [DATE, STOP]) notCounted(await at(setup, reply), reply);
+    for (const reply of ["it was due September 3", "the date printed on it is September 3"]) for (const setup of [DATE, STOP]) HEARD(await at(setup, reply), reply);
+    for (const setup of [DATE, STOP]) assert.match((await at(setup, "yesterday or today")).say, /^Just to check: .* on September 29\? /);   // two relative days
+    const ssa = new Dialog(mcp.callTool, { today: "2026-09-30" }); await ssa.handle("I got a letter from Social Security, they denied my disability again");
+    assert.match((await ssa.handle("the date printed on it is September 3")).say, /^(Your deadline is|That deadline was)/);
+    // X15: a second date of any kind in the reply sends the first to the check.
+    for (const reply of ["It was September 3 and yesterday", "September 3, or was it yesterday"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    // X16: at the check, a yes with anything more than yes words, thanks or a goodbye isn't a plain yes: the date again.
+    for (const reply of ["Yes, that is the due date", "yes, that's when it's due", "yes, the date on it"]) asked(await at(CHECKED, reply), reply);
+    // (Ten such yeses, at the 3-day, 30-day and 60-day checks; the hedged yeses too: never a deadline.)
+    const TEN = ["Yes, that is the due date", "yes, that's when it's due", "yes, the date on it", "yes, that's the rent due date", "yes, that's the printed date",
+      "yes, that's when I paid", "yes, that's the wrong one", "yes, about then", "yes I guess", "yes, I believe so", "sure, I guess", "yeah I think so", "yes, I think so"];
+    for (const [setup, held] of [[CHECKED, "3-day"], [["I got a 30 day notice", "September 3, thanks"], "30-day"], [HELD60, "60-day"]])
+      for (const reply of TEN) { const r = await at(setup, reply); assert.equal(r.done, false, `${held} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end your tenancy/i, `${held} → ${reply}`); }
+    // End to end from three entries (a denied date, a thanked date, a paid date): the check, then a yes with more words,
+    // is never a deadline.
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"])
+      for (const reply of TEN) {
+        const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice");
+        assert.match((await d.handle(entry)).say, /^Just to check: was the 3-day notice handed to you on September 3\?/, entry);
+        const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(r.done, false, `${entry} → ${reply}`);
+      }
+    for (const setup of [DATE, STOP]) assert.match((await at(setup, "yesterday, today")).say, /^Just to check: /);   // two relative days
+
+    for (const reply of ["yes", "yes, thanks", "yes, bye", "yes it was", "yes, September 3"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
     // Rule B / C: one row of every family, at the check too, is never counted from (the check or the date again).
     for (const reply of ["no, but I also got a summons", "September 3 is incorrect", "September 3, but that's wrong", "they left it on my door today", "I left it at home today",
       "September 3 was a mistake", "I'll pick it up on September 3", "I'm getting it September 3", "I hope to have it delivered today", "it should be delivered today",
