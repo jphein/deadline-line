@@ -5,7 +5,7 @@
 // and posts each final transcript to /api/decode, which runs the same Dialog over the same vendored rules.
 // The conversation's state rides along with each request, so the functions remember nothing between turns.
 // The phone line and the full web demo (neural voice, server-side limits) still run on src/server.js.
-import { Dialog, GREETING } from "./dialog.js";
+import { Dialog, GREETING, CARRIED_ASKS } from "./dialog.js";
 import { AAI_WS_URL, KEYTERMS, streamingQuery } from "./streaming.js";
 import { demoConfig, tokenLimits, MESSAGES } from "./limits.js";
 import { detectLetter, computeDeadline, listLetterTypes, todayIso, DecoderError } from "../vendor/deadline-decoder-mcp/src/decoder.js";
@@ -41,7 +41,7 @@ export function localCallTool() {
 }
 
 const LETTERS = new Set(listLetterTypes().map(t => t.id));
-const AWAITING = new Set(["letter", "date", "more", "text", "another"]);
+const AWAITING = new Set(["letter", "date", "more", "text", "another", "stop"]);
 
 /** The page sends back the state it was given, or anything at all: keep only well-formed fields. */
 export function cleanState(s) {
@@ -49,15 +49,16 @@ export function cleanState(s) {
   const letter = LETTERS.has(s.letter) ? s.letter : null;
   const date = typeof s.date === "string" && ISO_DATE.test(s.date) ? s.date : null;
   let awaiting = AWAITING.has(s.awaiting) ? s.awaiting : null;
-  if (awaiting === "more" && !(letter && date)) awaiting = null;     // "how did you count?" needs a deadline
+  if ((awaiting === "more" || awaiting === "text") && !(letter && date)) awaiting = null;   // both read the deadline
   const candidates = Array.isArray(s.candidates) ? [...new Set(s.candidates.filter(c => LETTERS.has(c)))].slice(0, 5) : [];
   const hoa = s.hoa === true;                                         // the caller said HOA (only a real boolean)
   const hoaSaid = s.hoaSaid === true;                                 // the HOA step already spoken (same)
   // The carried letters: real ids only, at most three. No sentence the page sends is spoken: its ids, dates and flags
   // only select the server's own text (a carrySpoken in the state is dropped).
-  const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c)))].slice(0, 3) : [];
+  const carry = Array.isArray(s.carry) ? [...new Set(s.carry.filter(c => LETTERS.has(c) || CARRIED_ASKS.has(c)))].slice(0, 3) : [];
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt by Dialog.restore() from the letter and the stage.
-  return { letter, date, awaiting, candidates, hoa, hoaSaid, carry };
+  const dateNo = s.dateNo === true;                                   // "no" to the date question once (only a real boolean)
+  return { letter, date, awaiting, candidates, hoa, hoaSaid, carry, dateNo };
 }
 
 /** /api/decode. GET: the line picks up (the greeting, and a new conversation's state).

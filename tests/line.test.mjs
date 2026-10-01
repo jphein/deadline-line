@@ -569,13 +569,13 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
   const mcp = await startMcp();
   try {
     const run = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const out = []; for (const t of turns) out.push({ ...(await d.handle(t)), letter: d.letter, awaiting: d.awaiting }); return out; };
-    const ALSO = /You also mentioned court papers for a lawsuit \(a Summons that isn't about an eviction\); tell me about that next\. Want me to explain how I counted\?$/;
+    const ALSO = /You also mentioned court papers for a lawsuit; tell me about that next\. Want me to explain how I counted\?$/;
     // The 3-day answer (it has counting steps), then "yes" explains, then the text offer, then the carried summons.
     for (const [textReply, lead] of [["yes", /^Okay\. In the real service I'd text the date/], ["no", /^Okay\. Now, about court papers/]]) {
       const r = await run(["the collection agency is suing me, I also got a 3 day notice", "September 28", "yes", textReply, "September 25"]);
       assert.equal(r[1].letter, "ca-3day"); assert.match(r[1].say, ALSO);
       assert.match(r[2].say, /^Here's how I counted\..*Would you like me to text you the date\?$/s);
-      assert.match(r[3].say, lead); assert.match(r[3].say, /Now, about court papers for a lawsuit .*What date is on it\?/);
+      assert.match(r[3].say, lead); assert.match(r[3].say, /Now, about court papers for a lawsuit\. What date is on it\?/);
       assert.equal(r[3].done, false); assert.equal(r[3].letter, "ca-civil-summons"); assert.equal(r[3].awaiting, "date");
       assert.equal(r[4].letter, "ca-civil-summons"); assert.match(r[4].say, /^Your deadline is Monday, October 26, 2026\./);
     }
@@ -586,21 +586,95 @@ test("dialog: a second letter named in the same turn is spoken and taken up next
     const summons = await run(["the collection agency is suing me, I also got a 3 day notice", "September 28", "the summons", "a lawsuit about money", "September 25"]);
     assert.equal(summons[2].say, "Is it about an eviction, a lawsuit about money, or jury duty?"); assert.equal(summons[2].letter, null);
     assert.equal(summons[3].letter, "ca-civil-summons"); assert.match(summons[4].say, /^Your deadline is Monday, October 26, 2026\./);
-    // The engine answers the summons first here; the 3-day notice is carried, and the caller describes it.
-    const other = await run(["I got a 3 day notice and also a summons from a debt collector", "September 25", "no", "it's a three day notice to pay rent, dated September 28"]);
-    assert.equal(other[1].letter, "ca-civil-summons"); assert.match(other[1].say, /You also mentioned a 3-day notice to pay rent or move out; tell me about that next\./);
-    assert.match(other[2].say, /^Okay\. Now, about a 3-day notice to pay rent or move out\./);
-    assert.equal(other[3].letter, "ca-3day"); assert.match(other[3].say, /^Your deadline is Thursday, October 1, 2026\./);
+    // The sooner deadline first (the 3-day notice), the summons carried; the caller then describes it.
+    const other = await run(["I got a 3 day notice and also a summons from a debt collector", "September 28", "no", "it's the summons from the debt collector, I got it September 25"]);
+    assert.equal(other[1].letter, "ca-3day"); assert.match(other[1].say, /You also mentioned court papers for a lawsuit; tell me about that next\./);
+    assert.match(other[2].say, /^Okay\. Now, about court papers for a lawsuit/);
+    assert.equal(other[3].letter, "ca-civil-summons"); assert.match(other[3].say, /^Your deadline is Monday, October 26, 2026\./);
     // A first answer with nothing to count asks the carried letter's date at once; a goodbye still ends the call.
-    const nod1 = await run(["I got a notice of default on my house, I also got a 3 day notice", "September 28"]);
-    assert.match(nod1[0].say, /You also mentioned a 3-day notice to pay rent or move out; tell me about that next\. What date is on it\?$/);
-    assert.equal(nod1[1].letter, "ca-3day"); assert.match(nod1[1].say, /^Your deadline is Thursday, October 1, 2026\./);
-    const bye = await run(["I got a notice of default on my house, I also got a 3 day notice", "goodbye"]);
+    const jury = await run(["I got a jury summons, I also got a 60 day notice to move out", "September 1"]);
+    assert.match(jury[0].say, /You also mentioned a 60-day notice to move out; tell me about that next\. What date is on it\?$/);
+    assert.equal(jury[1].letter, "ca-60day-notice");
+    const bye = await run(["I got a jury summons, I also got a 60 day notice to move out", "goodbye"]);
     assert.equal(bye[1].done, true);
+    // A carried letter with no date to ask for, after a first answer with nothing to count: offered, not asked a date.
+    const go = await run(["I got a jury summons, plus a notice of default", "yes"]);
+    assert.match(go[0].say, /tell me about that next\. Want me to go on to it\?$/); assert.doesNotMatch(go[0].say, /What date is on it/);
+    assert.equal(go[1].letter, "ca-foreclosure-nod"); assert.match(go[1].say, /^A Notice of Default starts the foreclosure clock/);
+    assert.doesNotMatch(go[1].say, /What date is on it|What day/);   // "yes" answers it, no date asked
+    const stop = await run(["I got a jury summons, plus a notice of default", "no"]);
+    assert.equal(stop[1].done, true);
+    // A carried question: with nothing to count first, it's asked at once; after a counted answer, where the carried
+    // letter would come in; "no" twice at the date question goes on to it too.
+    const asked = await run(["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"]);
+    assert.match(asked[0].say, /You also mentioned a summons or court papers; tell me about that next\. Is it about an eviction, a lawsuit about money, or jury duty\?$/);
+    assert.equal(asked[0].letter, null); assert.equal(asked[1].letter, "ca-civil-summons"); assert.match(asked[2].say, /^Your deadline is Monday, October 26, 2026\./);
+    const later = await run(["I got a 3 day notice, I also got a summons", "September 28", "no", "a lawsuit about money"]);
+    assert.match(later[1].say, /You also mentioned a summons or court papers; tell me about that next\. Want me to explain how I counted\?$/);
+    assert.equal(later[2].say, "Okay. Is it about an eviction, a lawsuit about money, or jury duty?"); assert.equal(later[3].letter, "ca-civil-summons");
+    const irs = await run(["I got a 3 day notice, plus a letter from the IRS", "no", "no"]);
+    assert.equal(irs[2].say, "Okay. Is it a CP2000 about proposed changes to your return, a Notice of Deficiency, or a final notice before a levy?");
     // A carried letter with no date to ask for is answered when it's reached.
     const nod = await run(["social security denied my disability, I also got a notice of default", "September 20", "yes", "no"]);
-    assert.match(nod[1].say, /You also mentioned a Notice of Default on your home loan/);
+    assert.match(nod[1].say, /You also mentioned a Notice of Default; tell me about that next\./);
     assert.equal(nod[3].letter, "ca-foreclosure-nod"); assert.match(nod[3].say, /^Okay\. A Notice of Default starts the foreclosure clock/);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: 'no' twice to the date question offers to stop, or goes on to a letter the caller also named", async () => {
+  const mcp = await startMcp();
+  try {
+    const run = async (turns) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const out = []; for (const t of turns) out.push({ ...(await d.handle(t)), letter: d.letter, awaiting: d.awaiting }); return out; };
+    const stop = await run(["I got a 3 day notice", "no", "no", "yes"]);
+    assert.match(stop[1].say, /^I still need the date on the letter\./);
+    assert.equal(stop[2].say, "Do you want to stop here?");
+    assert.equal(stop[3].done, true);
+    const keep = await run(["I got a 3 day notice", "no", "no", "no", "September 28"]);
+    assert.match(keep[3].say, /^Okay\. What date is on it\?/); assert.equal(keep[4].letter, "ca-3day"); assert.match(keep[4].say, /^Your deadline is/);
+    const onward = await run(["the collection agency is suing me, I also got a 3 day notice", "no", "no"]);
+    assert.match(onward[2].say, /^Okay\. Now, about court papers for a lawsuit/); assert.equal(onward[2].letter, "ca-civil-summons");
+    // At "Do you want to stop here?": a letter named in the reply is taken up, not a goodbye; a bare "yes" or "bye" ends
+    // the call; a bare "no" (don't stop) asks for the date again, in the letter's own words.
+    const atStop = async (reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of ["I got a 30 day notice", "no", "no"]) await d.handle(t); return { ...(await d.handle(reply)), letter: d.letter }; };
+    const taken = await atStop("yes, I also got a 3 day notice");
+    assert.equal(taken.done, false); assert.equal(taken.letter, "ca-3day"); assert.match(taken.say, /^Got it: California: a 3-day notice to pay rent or move out\. What date is on it\?/);
+    assert.equal((await atStop("yeah, there's a summons too")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
+    for (const reply of ["yes", "bye"]) assert.equal((await atStop(reply)).done, true, reply);
+    // The review's phrasings, at the 30-day notice's stop offer: the letter named is taken up, whatever word leads.
+    const ud = await atStop("yes, but I also got an eviction summons");
+    assert.equal(ud.letter, "ca-ud"); assert.match(ud.say, /^Got it: California: court papers for an eviction .*What date is on it\?/);
+    const jury = await atStop("bye, actually I have a jury summons");
+    assert.equal(jury.done, false); assert.equal(jury.letter, "jury-summons"); assert.match(jury.say, /^A jury summons prints its own date/);
+    // A notice of default has no date to ask for: it's answered.
+    const nod = await atStop("no, I got a notice of default");
+    assert.equal(nod.letter, "ca-foreclosure-nod"); assert.match(nod.say, /^A Notice of Default starts the foreclosure clock/);
+    assert.match((await atStop("no")).say, /^Okay\. What day was the notice handed to you\?/);
+    // One "no", then the date: no stop offer.
+    const once = await run(["I got a 3 day notice", "no", "September 28"]);
+    assert.match(once[2].say, /^Your deadline is/);
+    // The once-said "no" lasts one turn: a goodbye, or another letter, clears it (a later "no" starts over).
+    const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await d.handle("I got a 3 day notice"); await d.handle("no"); assert.equal(d.dateNo, true);
+    await d.handle("actually it's a 30 day notice"); assert.equal(d.dateNo, false);
+    assert.match((await d.handle("no")).say, /^I still need the date on the letter\./);
+    const bye = new Dialog(mcp.callTool, { today: "2026-09-30" });
+    await bye.handle("I got a 3 day notice"); await bye.handle("no"); await bye.handle("goodbye"); assert.equal(bye.dateNo, false);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: every letter is named well when it's carried ('Now, about …', 'You also mentioned …')", async () => {
+  const mcp = await startMcp();
+  try {
+    const types = (await mcp.callTool("list_letter_types", {})).letter_types;
+    assert.equal(types.length, 37);
+    for (const { id, needs_date, carry_title } of types) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      d.carry = [id];
+      const line = await d.carryLine();
+      assert.equal(line, `You also mentioned ${carry_title}; tell me about that next.`, id);
+      assert.doesNotMatch(line, /\bmy\b|California:|[()]/, id);
+      if (needs_date) assert.match((await d.startCarry("")).say, new RegExp(`^Now, about ${carry_title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\. What date is on it\\?`), id);
+    }
   } finally { await mcp.close(); }
 });
 

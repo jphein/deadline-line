@@ -34,6 +34,9 @@ const LENDER = /\b(mortgage|lender|bank|loan servicer|servicer|credit union)\b/i
 const HOA_LETTERS = new Set(["ca-foreclosure-nod", "ca-foreclosure-sale"]);
 const HOA_STEP = /^If your homeowners association is foreclosing\b/;
 const ASK_DATE = "What date is on it? You can say something like September 13th.";
+// A carried question ("…, I also got a summons": eviction, lawsuit or jury?) is kept as "ask:<its group's label>"; the
+// question and its candidates are the rules' own, looked up here, never taken from the state the page sends back.
+export const CARRIED_ASKS = new Map(AMBIGUOUS.filter(g => g.label).map(g => [`ask:${g.label}`, g]));
 
 export const GREETING = "Deadline Line. Tell me what kind of letter you got and the date on it. For example: " +
   "a letter from Social Security dated September 13th, or eviction papers handed to me yesterday.";
@@ -49,6 +52,7 @@ export class Dialog {
     this.hoa = false;             // the caller said it's their HOA, on this turn or an earlier one of this letter
     this.hoaSaid = false;         // the HOA step was already spoken for this letter (reset() clears it for the next one)
     this.carry = [];              // a second letter the caller named in the same turn ("…, I also got a 3 day notice"), next
+    this.dateNo = false;          // the caller said "no" to the date question once already
   }
 
   args(extra) { return this.today ? { ...extra, today: this.today } : extra; }
@@ -57,13 +61,13 @@ export class Dialog {
     if (done) { this.hoa = false; this.hoaSaid = false; }   // a finished conversation's HOA mention isn't the next one's
     return { say: text, done };
   }
-  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; }
+  reset() { this.letter = null; this.date = null; this.result = null; this.awaiting = null; this.candidates = []; this.dateQuestion = null; this.hoa = false; this.hoaSaid = false; this.carry = []; this.dateNo = false; }
 
   /** The conversation so far, as plain JSON, for a host that keeps nothing between turns (the Vercel demo
    *  hands it to the page and gets it back with the next turn). The deadline isn't in it: restore() recomputes it. */
   snapshot() {
     return { letter: this.letter, date: this.date, awaiting: this.awaiting, last: this.last, candidates: this.candidates, dateQuestion: this.dateQuestion, hoa: this.hoa, hoaSaid: this.hoaSaid,
-      carry: this.carry };
+      carry: this.carry, dateNo: this.dateNo };
   }
 
   /** Pick a conversation back up from snapshot(). Nothing it says is taken from the snapshot: the date question and
@@ -74,7 +78,7 @@ export class Dialog {
     dialog.letter = snap.letter ?? null; dialog.date = snap.date ?? null;
     dialog.awaiting = snap.awaiting ?? null;
     dialog.candidates = snap.candidates ?? []; dialog.hoa = snap.hoa === true; dialog.hoaSaid = snap.hoaSaid === true;
-    dialog.carry = snap.carry ?? [];
+    dialog.carry = snap.carry ?? []; dialog.dateNo = snap.dateNo === true;
     dialog.dateQuestion = RULES.find(r => r.id === dialog.letter)?.dateQuestion ?? null;
     if (dialog.awaiting === "more" || dialog.awaiting === "text") await dialog.compute();   // "how did you count?" reads the deadline
     dialog.last = await dialog.lastSaid();
@@ -90,12 +94,14 @@ export class Dialog {
       if (this.candidates.length && group) return group.question;
       return this.date ? `Got the date. ${UNKNOWN_LETTER}` : `${UNKNOWN_LETTER} And what date is on it?`;
     }
+    if (awaiting === "stop") return "Do you want to stop here?";
     if (awaiting === "text" && this.result) return `Here's how I counted. ${this.result.how_we_counted_spoken} Would you like me to text you the date?`;
-    if ((awaiting === "more" || awaiting === "another") && letter) {
+    // Only a letter that can be answered: one with its date, or one that has no date to ask for.
+    if ((awaiting === "more" || awaiting === "another") && letter && (this.date || RULES.find(r => r.id === letter)?.anchor === null)) {
       // The answer again, from a copy (answering changes what's carried and said once). It includes the HOA step when the
       // step was said for this letter (hoaSaid, a validated boolean).
       const copy = Object.assign(new Dialog(this.call, { today: this.today }), { letter, date: this.date, carry: [...this.carry], hoa: this.hoaSaid });
-      return (await copy.answer()).say;
+      return (await copy.answer()).say ?? GREETING;
     }
     return GREETING;
   }
@@ -104,6 +110,20 @@ export class Dialog {
     const t = (text || "").trim();
     if (!t) return this.say("Sorry, I didn't hear anything. " + GREETING);
     if (REPEAT.test(t) && !/\bdated\b|\bletter\b/i.test(t)) return this.say(this.last);
+    // "No" to the date question twice: go on to a letter the caller also named, or offer to stop, not the same ask again.
+    const saidNo = this.dateNo; this.dateNo = false;
+    if (this.awaiting === "date" && NO.test(t) && !LETTERISH.test(t)) {
+      if (saidNo && this.carry.length) return this.startCarry("Okay. ");
+      if (saidNo) { this.awaiting = "stop"; return this.say("Do you want to stop here?"); }
+      this.dateNo = true;
+    }
+    // "Do you want to stop here?": a letter named in the reply ("yes, I also got a 3 day notice") is taken up, not a goodbye.
+    // (A forged "stop" stage plus "yes" says goodbye without the offer having been made: self-only, like any stage the page
+    // sends back; the state isn't authenticated.)
+    if (this.awaiting === "stop" && !LETTERISH.test(t)) {
+      if (YES.test(t) || BYE.test(t)) return this.goodbye();
+      if (NO.test(t)) { this.awaiting = "date"; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }
+    }
 
     if (this.awaiting === "more") {
       if (HOW.test(t) || YES.test(t)) {
@@ -133,6 +153,13 @@ export class Dialog {
     if (this.awaiting === "another") {         // after an answer with nothing to count: another letter?
       if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();
       const carry = this.carry;
+      // A carried question first (not reached in real flows: answer() opens it itself; kept for a state the page sends).
+      if (CARRIED_ASKS.has(carry[0])) return this.startCarry("");
+      // "Want me to go on to it?" (a carried letter with no date to ask for): yes takes it up, no ends the call.
+      if (carry.length && (await this.letterInfo(carry[0])).needs_date === false && !LETTERISH.test(t)) {
+        if (YES.test(t)) return this.startCarry("");
+        if (NO.test(t)) return this.goodbye();
+      }
       if (!carry.length && NO.test(t) && !LETTERISH.test(t)) return this.goodbye();
       this.reset();
       // The letter the caller also named: this turn is about it (its date, or just "okay").
@@ -140,7 +167,7 @@ export class Dialog {
       else if (YES.test(t) && !LETTERISH.test(t)) return this.say("Okay. Tell me what kind of letter it is, and the date on it.");
     }
     const answered = this.awaiting === "more" || this.awaiting === "text";
-    if (BYE.test(t) && !/\bletter|notice|papers\b/i.test(t)) return this.goodbye();
+    if (BYE.test(t) && !LETTERISH.test(t)) return this.goodbye();   // "bye, actually I have a jury summons" isn't a goodbye
 
     // A date answer has no letter in its words: say which letter we're on, so its date is read the right way
     // ("the due date was August 1st" looks back for a shutoff notice).
@@ -150,7 +177,8 @@ export class Dialog {
     // After an answer, a "which one?" is about a new letter ("the summons"): not the one just answered.
     if (answered && this.candidates.length) { this.letter = null; this.date = null; }
     // A second letter named in the same turn is carried, to be taken up after this one.
-    if (det.also_detected?.length) this.carry = det.also_detected;
+    const also = [...(det.also_detected ?? []), ...(det.also_asks ?? []).map(a => `ask:${a.label}`)].filter(c => !c.startsWith("ask:") || CARRIED_ASKS.has(c));
+    if (also.length) this.carry = also;
     if (this.carry.length && det.recognized) this.carry = this.carry.filter(id => id !== det.letter_type);
     if (det.recognized && det.letter_type !== this.letter) { this.letter = det.letter_type; this.date = null; this.dateQuestion = det.date_question ?? null; }
     if (det.suggested_notice_date) this.date = det.suggested_notice_date;
@@ -196,7 +224,12 @@ export class Dialog {
         : `Your deadline is ${r.deadline_spoken}. That's ${r.days_left === 1 ? "tomorrow" : r.days_left === 0 ? "today" : r.days_left + " days from today"}.`;
     // What's said about a carried letter is built here, from its id: never a sentence the page sent back.
     const carried = this.carry.length ? `${await this.carryLine()} ` : "";
-    const next = carried + (counted ? "Want me to explain how I counted?" : this.carry.length ? "What date is on it?" : "Do you have another letter I can help with?");
+    const firstAsk = CARRIED_ASKS.get(this.carry[0]);
+    const undated = this.carry.length && !firstAsk && (await this.letterInfo(this.carry[0])).needs_date === false;
+    const next = carried + (counted ? "Want me to explain how I counted?" : !this.carry.length ? "Do you have another letter I can help with?"
+      : firstAsk ? firstAsk.question : undated ? "Want me to go on to it?" : "What date is on it?");
+    // Nothing to count and a question carried: that question is open now.
+    if (!counted && firstAsk) { this.carry = this.carry.slice(1); this.candidates = firstAsk.candidates; this.awaiting = "letter"; this.letter = null; this.date = null; }
     // A second date or condition some letters carry (keep benefits while you wait; the 90-day rent date) comes next.
     const also = r.also_spoken ? ` ${r.also_spoken}` : "";
     // A caller who said it's their HOA foreclosing also hears the redemption right (the engine's own step, not a copy).
@@ -210,7 +243,10 @@ export class Dialog {
   /** Take up the letter the caller also named: ask its date (or answer it, when it has none). */
   async startCarry(prefix) {
     const [id, ...rest] = this.carry;
-    this.reset(); this.carry = rest; this.letter = id;
+    this.reset(); this.carry = rest;
+    const ask = CARRIED_ASKS.get(id);
+    if (ask) { this.candidates = ask.candidates; this.awaiting = "letter"; return this.say(`${prefix}${ask.question}`); }
+    this.letter = id;
     const info = await this.letterInfo(id);
     if (info.needs_date === false) { const a = await this.answer(); return this.say(prefix + a.say); }
     this.awaiting = "date";
@@ -220,13 +256,13 @@ export class Dialog {
   async letterInfo(id) {
     const all = (this.types ??= (await this.call("list_letter_types", {})).letter_types);
     const t = all.find(x => x.id === id) ?? { title: "other letter", needs_date: true };
-    return { ...t, short: t.title.replace(/^California: /, "") };
+    return { ...t, short: t.carry_title ?? t.title.replace(/^California: /, "") };   // the engine's short spoken name
   }
 
   /** "You also mentioned …; tell me about that next.", from the carried ids and the engine's titles. */
   async carryLine() {
     const names = [];
-    for (const id of this.carry) names.push((await this.letterInfo(id)).short);
+    for (const id of this.carry) names.push(CARRIED_ASKS.get(id)?.label ?? (await this.letterInfo(id)).short);
     return `You also mentioned ${names.join(" and ")}; tell me about that next.`;
   }
 

@@ -57,6 +57,12 @@ test("api/decode answers turn for turn what the phone line answers (same Dialog;
       ["my homeowners association sent a notice of trustee's sale", "no"],
       ["my HOA sent me a letter", "a notice of default", "no"],
       ["I got a notice of default on my house", "it's from my HOA", "no"],
+      ["I got a 3 day notice", "no", "no", "no", "September 28"],
+      ["I got a 3 day notice", "no", "no", "say that again", "yes"],
+      // (A repeat once a carried question is open is, through the page, the question alone; the phone line repeats its
+      // full last line. The same accepted "rebuilt, not verbatim" class as #24, so no repeat in these parity flows.)
+      ["I got a notice of default on my house, I also got a summons", "a lawsuit about money", "September 25"],
+      ["I got a 3 day notice, I also got a summons", "September 28", "no", "a lawsuit about money"],
       ["I got a notice of default on my house", "it's from my HOA", "it's from my HOA", "no"],
       ["my HOA sent a notice of default", "it's from my HOA", "no"],
       ["my friend Hoa helped me read the notice of default on my house", "no"],
@@ -85,7 +91,7 @@ test("api/decode: the SSA sample gives the real date, explains on request, and s
 test("api/decode GET: the greeting and a new conversation", T, async () => {
   const r = await decodeApi.GET(req("/api/decode"));
   assert.equal(r.status, 200); assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [] } });
+  assert.deepEqual(await r.json(), { say: GREETING, done: false, state: { letter: null, date: null, awaiting: null, last: GREETING, candidates: [], dateQuestion: null, hoa: false, hoaSaid: false, carry: [], dateNo: false } });
 });
 
 test("api/decode: a carrySpoken the page sends is never spoken; the carried letter gets the server's own line", T, async () => {
@@ -95,7 +101,7 @@ test("api/decode: a carrySpoken the page sends is never spoken; the carried lett
     const j = await r.json();
     assert.ok(!j.say.includes(injected), injected);
     assert.doesNotMatch(j.say, /gift card|555-0100|<script>/);
-    assert.match(j.say, / You also mentioned court papers for a lawsuit \(a Summons that isn't about an eviction\); tell me about that next\. Want me to explain how I counted\?$/);
+    assert.match(j.say, / You also mentioned court papers for a lawsuit; tell me about that next\. Want me to explain how I counted\?$/);
     assert.equal("carrySpoken" in j.state, false);
   }
 });
@@ -131,15 +137,39 @@ test("api/decode: a 'last' or 'dateQuestion' the page sends is never spoken; the
   assert.equal(asked[1].say, asked[0].say);
 });
 
+test("api/decode: a tampered stage without the date it needs gets the greeting, not an error", T, async () => {
+  const post = async (transcript, state) => decodeApi.POST(req("/api/decode", { body: { transcript, state, today: "2026-09-30" } }));
+  for (const state of [{ awaiting: "another", letter: "ca-3day" }, { awaiting: "text", letter: "ca-3day" }]) {
+    const r = await post("say that again", state);
+    assert.equal(r.status, 200, JSON.stringify(state)); assert.equal((await r.json()).say, GREETING, JSON.stringify(state));
+  }
+  const yes = await post("yes", { awaiting: "text", letter: "ca-3day" });
+  assert.equal(yes.status, 200); assert.match((await yes.json()).say, /^I still need the date on the letter\./);
+  // A letter with no date to ask for still repeats its answer at "another".
+  assert.match((await (await post("say that again", { awaiting: "another", letter: "ca-foreclosure-nod" })).json()).say, /^A Notice of Default starts the foreclosure clock/);
+});
+
+test("api/decode: a carried question first at 'another' (a state the page sends) is asked, not used as a letter", T, async () => {
+  for (const transcript of ["no", "yes"]) {
+    const r = await decodeApi.POST(req("/api/decode", { body: { transcript, today: "2026-09-30",
+      state: { letter: "jury-summons", awaiting: "another", carry: ["ask:a letter from the IRS"] } } }));
+    assert.equal(r.status, 200, transcript);
+    assert.equal((await r.json()).say, "Is it a CP2000 about proposed changes to your return, a Notice of Deficiency, or a final notice before a levy?", transcript);
+  }
+});
+
 test("api/decode: a state the page tampered with is cleaned, not trusted", T, async () => {
   assert.deepEqual(cleanState({ letter: "evil", date: "soon", awaiting: "more", last: 7, candidates: ["nope", "jury-summons", "jury-summons"], dateQuestion: 5 }),
-    { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [] });
+    { letter: null, date: null, awaiting: null, candidates: ["jury-summons"], hoa: false, hoaSaid: false, carry: [], dateNo: false });
   // Only a real boolean true survives as the HOA flag.
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoa: v }).hoa, want, String(v));
   for (const [v, want] of [[true, true], ["yes", false], [1, false], [{}, false], [undefined, false]]) assert.equal(cleanState({ hoaSaid: v }).hoaSaid, want, String(v));
   // The carried letters: real ids only, at most three.
   assert.deepEqual(cleanState({ carry: ["ca-3day", "nope", "ca-3day", "ca-ud", "jury-summons", "ca-noa"] }).carry, ["ca-3day", "ca-ud", "jury-summons"]);
   assert.deepEqual(cleanState({ carry: "ca-3day" }).carry, []);
+  for (const [v, want] of [[true, true], ["yes", false], [1, false], [undefined, false]]) assert.equal(cleanState({ dateNo: v }).dateNo, want, String(v));
+  // A carried question only by a label the rules know: the question and its candidates are the server's.
+  assert.deepEqual(cleanState({ carry: ["ask:a summons or court papers", "ask:INJECTED TEXT", "INJECTED TEXT"] }).carry, ["ask:a summons or court papers"]);
   // A carrySpoken in the state is dropped: the line about a carried letter is the server's own.
   assert.equal("carrySpoken" in cleanState({ carry: ["ca-civil-summons"], carrySpoken: "INJECTED TEXT" }), false);
   // No text from the page is kept: "last" and "dateQuestion" are rebuilt on the server.
