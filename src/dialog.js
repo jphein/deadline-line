@@ -90,15 +90,25 @@ const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:delivered|given|handed|sent|mail
 const SEND_VERB = /\b(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed|took|brought)\b/gi;
 const PASSIVE_BEFORE = /\b(?:was|were|been|be|being|is|are|am|get|gets|got|getting)\s+(?:\w+\s+)?$/i;
 const TO_SOMEONE = /\bto\s+(?:him|her|them|my|the|our|his|their|a|an)\b/i;
-const RECIPIENT = { test: (s) => /\b(?:landlord|manager|property manager|owner|agency|lender|bank|office|court|lawyer|attorney|clerk|roommate|husband|wife|son|daughter)s?\b/i.test(s) || TO_SOMEONE.test(s) };
+const RECIPIENT_NOUN = "(?:landlord|manager|property manager|owner|agency|lender|bank|office|court|lawyer|attorney|clerk|roommate|husband|wife|son|daughter)s?";
+const RECIPIENT_RE = new RegExp(`\\b${RECIPIENT_NOUN}\\b`, "i");
+const RECIPIENT = { test: (s) => RECIPIENT_RE.test(s) || TO_SOMEONE.test(s) };
 // "by me / us", "by my husband" after a send verb is the caller's side sending: "it was mailed by me", "it was dropped
 // off by my husband".
 const BY_CALLER = /\bby\s+(?:me|us|(?:my|our)\s+(?:husband|wife|partner|lawyer|attorney|roommate|son|daughter|mother|father))\b/i;
 const TO_ME = /^\s+(?:(?:it|them|this|that|one|the\s+\w+(?:\s+\w+)?|a\s+\w+|my\s+\w+(?:\s+\w+)?)\s+)?(?:back\s+)?(?:(?:to|over\s+to)\s+)?(?:me|us)\b/i;
 // A verbless fragment after a break that starts with to / by / from and a noun or pronoun ("they sent it. To my landlord.",
 // "it was mailed; by me", "sent it and to my landlord") still belongs to the clause before it.
-const FRAGMENT = { test: (c) => /^\s*(?:to|by|from)\s+(?:me|us|him|her|them|my|our|the|his|their|your|a|an)\b/i.test(c) && !/\b(?:i|we|they|he|she|you)\b/i.test(c) };
-const sendClauses = (t) => t.split(/[.;!?]+|\b(?:and|but|because|so)\b/i).reduce((out, c) => { if (out.length && FRAGMENT.test(c)) out[out.length - 1] += ` ${c}`; else out.push(c); return out; }, []);
+// It may open with up to three fillers or adverbs ("And to my landlord.", "Over to my landlord.", "Just by me."), any
+// determiner or none ("To landlord.", "To that landlord."), then a pronoun or a recipient noun; a blank clause (". And"
+// splits around nothing) never takes it.
+const FRAGMENT_RE = new RegExp(`^\\s*(?:(?:um|uh|er|erm|well|oh|so|and|then|also|just|actually|only|over|off|back|right|straight|directly)[\\s,]+){0,3}`
+  + `(?:to|by|from)\\s+(?:(?:my|our|the|his|their|your|a|an|that|this|those|these)\\s+)?(?:me|us|him|her|them|partner|mother|father|${RECIPIENT_NOUN})\\b`, "i");
+const FRAGMENT = { test: (c) => FRAGMENT_RE.test(c) && !/\b(?:i|we|they|he|she|you)\b/i.test(c) };
+// Fillers go with their commas before the send tests: "By, uh, me." reads "By me", "Um, by me." reads "by me".
+const noFillers = (t) => t.replace(/,?\s*\b(?:um+|uh+|er+|erm)\b\s*,?/gi, " ");
+const sendClauses = (t) => noFillers(t).split(/[.;!?]+|\b(?:and|but|because|so)\b/i).filter(c => /\w/.test(c))
+  .reduce((out, c) => { if (out.length && FRAGMENT.test(c)) out[out.length - 1] += ` ${c}`; else out.push(c); return out; }, []);
 const SENT_TO_SOMEONE = { test: (t) => sendClauses(t).some(clause => {   // a comma doesn't end the search: "sent it on September 3, to my landlord"
   for (const m of clause.matchAll(SEND_VERB)) {
     const before = clause.slice(0, m.index), after = clause.slice(m.index + m[0].length);
@@ -613,12 +623,14 @@ export class Dialog {
       // 3rd") names a date to act by, for every letter: the check. (For the water bill, "says it's due <date>" is its due
       // date, the clock's start.)
       const L = det?.letter_type ?? this.letter, before = t.slice(0, cands[0].start);
-      const dueDate = RULES.find(r => r.id === L)?.anchor === "due" && /\bdue\s+(?:on\s+)?$/i.test(before);
-      const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(before)
-          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|given|delivered)\b(?:\s+[\w']+){0,4}\s+$/i.test(before))   // "says I received this on <date>": a receipt
-        || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(before)
+      // (Read with punctuation as spaces: "my notice says: September 3", "says by, September 3", "given. September 3".)
+      const beforeWords = before.replace(/[^\w\s']+/g, " ");
+      const dueDate = RULES.find(r => r.id === L)?.anchor === "due" && /\bdue\s+(?:on\s+)?$/i.test(beforeWords);
+      const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(beforeWords)
+          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|given|delivered)\b(?:\s+[\w']+){0,4}\s+$/i.test(beforeWords))   // "says I received this on <date>": a receipt
+        || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(beforeWords)
         // "says I was given <date>" with no object, for every letter: it may be "given until" a date to pay or move by.
-        || /\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+){0,4}?\s+given\b(?!\s+(?:it|this|that|them|(?:(?:the|a|my|this)\s+)?(?:notice|letter|papers|copy)|to\s+(?:me|us))\b)(?:\s+[\w']+){0,2}\s+$/i.test(before);
+        || /\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+){0,4}?\s+given\b(?!\s+(?:it|this|that|them|(?:(?:the|a|my|this)\s+)?(?:notice|letter|papers|copy)|to\s+(?:me|us))\b)(?:\s+[\w']+){0,4}\s+$/i.test(beforeWords);
       const direct = cands.length === 1 && !statedDate && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
       return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
     }
