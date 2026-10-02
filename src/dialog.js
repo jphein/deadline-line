@@ -113,14 +113,17 @@ const TO_ANYONE = /\b(?:to|for)\s+(?:him|her|them|someone|somebody|everyone)\b/i
 // …or named before it as a to / for phrase ("yes, to my landlord they sent it", "for my landlord they mailed it"); never a
 // bare noun ("the landlord mailed it", "I was handed it by the landlord" stay receipts).
 const TO_SOMEONE_BEFORE = new RegExp(`\\b(?:to|for)\\s+(?:(?:my|our|the|his|her|their|a|an|that|this)\\s+)?(?:${RECIPIENT_NOUN}|him|her|them|someone|somebody|everyone)\\b`, "i");
-const PRONOUN_OBJECT = /^\s+(?:it\s+)?(?:him|her|them)\b/i;
+const PRONOUN_OBJECT = /^\s+(?:it\s+)?(?:(?:just|only|also|even|directly|actually|over|right)\s+)?(?:him|her|them)\b/i;   // "they served just him"
+// …unless the caller shares it ("him and me", "her and me the notice"), or is the passive subject ("I was handed them").
+const PRONOUN_SHARED = /^\s+(?:it\s+)?(?:(?:just|only|also|even|directly|actually|over|right)\s+)?(?:him|her|them)\s+and\s+(?:me|us)\b/i;
+const CALLER_PASSIVE = /\b(?:i|we)\s+(?:was|were|am|are|get|got|(?:have|has|had)\s+been|'ve\s+been)\s+(?:\w+\s+)?$/i;
 const SENT_TO_SOMEONE = { test: (u) => {
   for (const m of [...u.matchAll(SEND_VERB), ...u.matchAll(ARRIVE_VERB)]) {
     const after = u.slice(m.index + m[0].length), arrived = /^(?:came|got|went|reached)$/i.test(m[0]);
     if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;
     if (BY_CALLER.test(after) || TO_SOMEONE_BEFORE.test(u.slice(0, m.index))) return true;
     // A pronoun right after a send verb is who it went to: "they handed him the notice", "they served her", "they gave it him".
-    if (!arrived && PRONOUN_OBJECT.test(after)) return true;
+    if (!arrived && PRONOUN_OBJECT.test(after) && !PRONOUN_SHARED.test(after) && !CALLER_PASSIVE.test(u.slice(0, m.index))) return true;
     // A cleft with the "to" stranded ("it was my landlord they sent it to", "... sent it to on September 3"): the recipient came first.
     if (/\b(?:to|for)\s*(?:$|(?:on|in|at|last|this|yesterday|today)\b)/i.test(after) && (RECIPIENT_RE.test(u.slice(0, m.index)) || /\b(?:him|her|them)\b/i.test(u.slice(0, m.index)))) return true;
     if (RECIPIENT.test(after.replace(arrived ? SOURCE : AGENT, " ")) || TO_ANYONE.test(after)) return true;

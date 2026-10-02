@@ -1729,6 +1729,21 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
         "it got to my landlord September 3", "it got to them September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: "got" as an arrival verb
       for (const reply of ["they handed me the notice on September 3", "they served me September 3", "I got them September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
     }
+    // X50 / X51 / X52: the pronoun may follow an adverb ("they handed just them the letter"); a pronoun the caller shares
+    // ("him and me") or receives in the passive ("I was handed them", "we were sent them") is a receipt.
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of ["yes, they handed just them the letter", "yes, they served just him", "yes, they sent also them the notice", "yes, they served actually him", "yes, they handed over him the notice",
+        "yes, they served him and her"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["yes, I was handed them", "yes, we were sent them", "yes, they served him and me", "yes, they handed her and me the notice"]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle("yes, they handed just them the letter"); assert.doesNotMatch(r.say, /deadline/i, entry); assert.equal(d.date, null, entry);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["They served just him September 3", "They gave just her the notice September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["I was handed them September 3", "we were sent them September 3", "They served him and me September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
     // X48: a passive send with the recipient as its subject ("my landlord was served September 3") is the check at the
     // first answer; "I was served", "we were sent it", "it was served on me" still count.
     for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
