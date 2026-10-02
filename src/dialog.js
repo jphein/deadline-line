@@ -113,11 +113,14 @@ const TO_ANYONE = /\b(?:to|for)\s+(?:him|her|them|someone|somebody|everyone)\b/i
 // …or named before it as a to / for phrase ("yes, to my landlord they sent it", "for my landlord they mailed it"); never a
 // bare noun ("the landlord mailed it", "I was handed it by the landlord" stay receipts).
 const TO_SOMEONE_BEFORE = new RegExp(`\\b(?:to|for)\\s+(?:(?:my|our|the|his|her|their|a|an|that|this)\\s+)?(?:${RECIPIENT_NOUN}|him|her|them|someone|somebody|everyone)\\b`, "i");
+const PRONOUN_OBJECT = /^\s+(?:it\s+)?(?:him|her|them)\b/i;
 const SENT_TO_SOMEONE = { test: (u) => {
   for (const m of [...u.matchAll(SEND_VERB), ...u.matchAll(ARRIVE_VERB)]) {
     const after = u.slice(m.index + m[0].length), arrived = /^(?:came|got|went|reached)$/i.test(m[0]);
     if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;
     if (BY_CALLER.test(after) || TO_SOMEONE_BEFORE.test(u.slice(0, m.index))) return true;
+    // A pronoun right after a send verb is who it went to: "they handed him the notice", "they served her", "they gave it him".
+    if (!arrived && PRONOUN_OBJECT.test(after)) return true;
     // A cleft with the "to" stranded ("it was my landlord they sent it to", "... sent it to on September 3"): the recipient came first.
     if (/\b(?:to|for)\s*(?:$|(?:on|in|at|last|this|yesterday|today)\b)/i.test(after) && (RECIPIENT_RE.test(u.slice(0, m.index)) || /\b(?:him|her|them)\b/i.test(u.slice(0, m.index)))) return true;
     if (RECIPIENT.test(after.replace(arrived ? SOURCE : AGENT, " ")) || TO_ANYONE.test(after)) return true;
@@ -131,7 +134,9 @@ const NAMES_RECIPIENT = { test: (words) => {
   if (!RECIPIENT_RE.test(u.replace(SOURCE, " "))) return false;
   return !(/\bto\s+(?:me|us)\b/i.test(u) || [...u.matchAll(SEND_VERB)].some(m => TO_ME.test(u.slice(m.index + m[0].length))));
 } };
-const SELF_SENT = { test: (t) => { const u = sendText(t); return SELF_SENT_FIRST.test(u) || SENT_BY_CALLER.test(u) || SENT_TO_SOMEONE.test(u); } };
+// A passive send with the recipient as its subject: "my landlord was served September 3", "my landlord was mailed it".
+const RECIPIENT_PASSIVE = new RegExp(`\\b(?:(?:my|our|the|his|her|their|a|an|that|this)\\s+)?${RECIPIENT_NOUN}\\s+(?:was|were|got|(?:has|have|had)\\s+been)\\s+(?:sent|mailed|handed|given|delivered|posted|served|faxed|emailed|dropped|returned)\\b`, "i");
+const SELF_SENT = { test: (t) => { const u = sendText(t); return SELF_SENT_FIRST.test(u) || SENT_BY_CALLER.test(u) || SENT_TO_SOMEONE.test(u) || RECIPIENT_PASSIVE.test(u); } };
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
 const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
 /** The words of `t` other than the given spans and relative days (lowercase, punctuation dropped). */
