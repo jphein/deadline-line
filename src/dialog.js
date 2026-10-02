@@ -88,7 +88,6 @@ const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:delivered|given|handed|sent|mail
 // was mailed over to the landlord", not "I was handed it by the manager"), unless that recipient is "me / us"
 // ("they also sent it to me", "the landlord then handed it to me", "they just gave me the notice").
 const SEND_VERB = /\b(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed|took|brought)\b/gi;
-const PASSIVE_BEFORE = /\b(?:was|were|been|be|being|is|are|am|get|gets|got|getting)\s+(?:\w+\s+)?$/i;
 const TO_SOMEONE = /\bto\s+(?:him|her|them|my|the|our|his|their|a|an)\b/i;
 const RECIPIENT_NOUN = "(?:landlord|manager|property manager|owner|agency|lender|bank|office|court|lawyer|attorney|clerk|roommate|husband|wife|son|daughter)s?";
 const RECIPIENT_RE = new RegExp(`\\b${RECIPIENT_NOUN}\\b`, "i");
@@ -97,28 +96,26 @@ const RECIPIENT = { test: (s) => RECIPIENT_RE.test(s) || TO_SOMEONE.test(s) };
 // off by my husband".
 const BY_CALLER = /\bby\s+(?:me|us|(?:my|our)\s+(?:husband|wife|partner|lawyer|attorney|roommate|son|daughter|mother|father))\b/i;
 const TO_ME = /^\s+(?:(?:it|them|this|that|one|the\s+\w+(?:\s+\w+)?|a\s+\w+|my\s+\w+(?:\s+\w+)?)\s+)?(?:back\s+)?(?:(?:to|over\s+to)\s+)?(?:me|us)\b/i;
-// A verbless fragment after a break that starts with to / by / from and a noun or pronoun ("they sent it. To my landlord.",
-// "it was mailed; by me", "sent it and to my landlord") still belongs to the clause before it.
-// It may open with up to three fillers or adverbs ("And to my landlord.", "Over to my landlord.", "Just by me."), any
-// determiner or none ("To landlord.", "To that landlord."), then a pronoun or a recipient noun; a blank clause (". And"
-// splits around nothing) never takes it.
-const FRAGMENT_RE = new RegExp(`^\\s*(?:(?:um|uh|er|erm|well|oh|so|and|then|also|just|actually|only|over|off|back|right|straight|directly)[\\s,]+){0,3}`
-  + `(?:to|by|from)\\s+(?:(?:my|our|the|his|their|your|a|an|that|this|those|these)\\s+)?(?:me|us|him|her|them|partner|mother|father|${RECIPIENT_NOUN})\\b`, "i");
-const FRAGMENT = { test: (c) => FRAGMENT_RE.test(c) && !/\b(?:i|we|they|he|she|you)\b/i.test(c) };
-// Fillers go with their commas before the send tests: "By, uh, me." reads "By me", "Um, by me." reads "by me".
+// The send tests read the turn with fillers and their commas gone ("By, uh, me." reads "By me") and punctuation as spaces
+// ("To, my landlord.", "To. My landlord.", "From, me.").
 const noFillers = (t) => t.replace(/,?\s*\b(?:um+|uh+|er+|erm)\b\s*,?/gi, " ");
-const sendClauses = (t) => noFillers(t).split(/[.;!?]+|\b(?:and|but|because|so)\b/i).filter(c => /\w/.test(c))
-  .reduce((out, c) => { if (out.length && FRAGMENT.test(c)) out[out.length - 1] += ` ${c}`; else out.push(c); return out; }, []);
-const SENT_TO_SOMEONE = { test: (t) => sendClauses(t).some(clause => {   // a comma doesn't end the search: "sent it on September 3, to my landlord"
-  for (const m of clause.matchAll(SEND_VERB)) {
-    const before = clause.slice(0, m.index), after = clause.slice(m.index + m[0].length);
-    if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;   // "to me" anywhere after wins over a source: "from my landlord to me"
+const sendText = (t) => noFillers(t).replace(/[^\w\s']+/g, " ").replace(/\s+/g, " ");
+// A send verb with someone it went to anywhere after it in the turn, not only in its own clause ("yes, they sent it. It
+// was to my landlord.", "Okay. To my landlord.", "It was by me."): a recipient noun, "to / for him, them, someone", or "by
+// me / us / my husband". "To me / us" anywhere after the verb wins (a receipt: "from my landlord to me", "To my landlord.
+// And to me."). An agent ("I was handed it by the landlord") isn't a recipient.
+const AGENT = new RegExp(`\\bby\\s+(?:(?:the|a|an|my|our|his|her|their|that|this)\\s+)?${RECIPIENT_NOUN}\\b`, "gi");
+const TO_ANYONE = /\b(?:to|for)\s+(?:him|her|them|someone|somebody|everyone)\b/i;
+const SENT_TO_SOMEONE = { test: (u) => {
+  for (const m of u.matchAll(SEND_VERB)) {
+    const after = u.slice(m.index + m[0].length);
+    if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;
     if (BY_CALLER.test(after)) return true;
-    if (PASSIVE_BEFORE.test(before) ? TO_SOMEONE.test(after) : RECIPIENT.test(after)) return true;
+    if (RECIPIENT.test(after.replace(AGENT, " ")) || TO_ANYONE.test(after)) return true;
   }
   return false;
-}) };
-const SELF_SENT = { test: (t) => SELF_SENT_FIRST.test(t) || SENT_BY_CALLER.test(t) || SENT_TO_SOMEONE.test(t) };
+} };
+const SELF_SENT = { test: (t) => { const u = sendText(t); return SELF_SENT_FIRST.test(u) || SENT_BY_CALLER.test(u) || SENT_TO_SOMEONE.test(u); } };
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
 const TODAYISH = /\b(?:today|tonight|this (?:morning|afternoon|evening))\b/i;
 /** The words of `t` other than the given spans and relative days (lowercase, punctuation dropped). */

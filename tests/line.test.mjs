@@ -1523,8 +1523,10 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
       asked(await at(setup, reply), `${setup[0]} → ${reply}`);
     const PLAIN27 = /^(That deadline was Wednesday, September 9, 2026|A (30|60)-day notice can't end your tenancy before (Saturday, October 3|Monday, November 2), 2026|Most water systems can't shut off your water before Monday, November 2, 2026|If the increase is 10 percent or less)/;
     for (const reply of ["they also sent it to me September 3", "they gave me my landlord notice on September 3", "I was handed it by the landlord September 3", "it was handed to me September 3",
-      "they mailed it on September 3 and the landlord came by", "I came and they handed it to me on September 3"])   // another clause; another subject
+      "I came and they handed it to me on September 3"])   // another clause; another subject
       for (const setup of [DATE, STOP, THIRTY, SIXTY_DATE, WATER, RENT]) assert.match((await at(setup, reply)).say, PLAIN27, `${setup[0]} → ${reply}`);
+    // A recipient anywhere after a send verb, even in another clause, is the check: one extra turn.
+    for (const setup of [DATE, STOP, THIRTY, SIXTY_DATE, WATER, RENT]) HEARD(await at(setup, "they mailed it on September 3 and the landlord came by"), `${setup[0]} → landlord came by`);
     for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, they just gave it to me", "yes, they also sent it to me", "yes, the landlord then handed it to me", "yes, they gave me my landlord notice"])
       assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
     // X28: for the letters that state a later date, "says" and up to five words in the same clause before the date ("says
@@ -1583,7 +1585,7 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
         "They sent it on September 3, over to my landlord", "It was mailed on September 3, actually by me",
         "They sent it on September 3, the notice to my landlord", "It was mailed on September 3, the notice by me"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
       counted(await at(setup, "They sent my notice on September 3. To me."), `${setup[0]} → to me`);
-      counted(await at(setup, "They mailed it on September 3. From my landlord we got it."), `${setup[0]} → a fragment with its own subject`);   // a new subject ends the fragment
+      heldAt(await at(setup, "They mailed it on September 3. From my landlord we got it."), `${setup[0]} → a subject later in the clause`);   // only a clause that opens with its subject ends the search: one extra turn
     }
     // X36: the fragment may open with up to three fillers or adverbs ("And to", "Over to", "Just by", "Um, by"), fillers go
     // with their commas ("By, uh, me."), and a blank clause never takes it: not a plain yes at the check, end to end from the
@@ -1632,6 +1634,50 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
     }
     heldAt(await at(THIRTY, "my notice says: September 3"), "30-day says:");
     counted(await at(DATE, "my notice says: September 3"), "3-day says:");   // decided: the bare "says" is for the letters that state a later date
+    // X40 / X32h: a send verb with someone it went to anywhere after it in the turn (not only in its own clause), read
+    // with punctuation as spaces, is not a plain yes at the check, end to end from the three entries, and the check at the
+    // first answer; "to me / us" anywhere after the verb wins.
+    const WINDOW = ["yes, they sent it. Okay, to my landlord.", "yes, they sent it. Yeah, to my landlord.", "yes, they sent it. On to my landlord.", "yes, they sent it. Okay. To my landlord.",
+      "yes, they sent it. Yes. To my landlord.", "yes, they sent it. That's it. To my landlord.", "yes, they sent it. Here. To my landlord.", "yes, they sent it. Well, um, actually, so, to my landlord.",
+      "yes, they sent it. To. My landlord.", "yes, they sent it to. My landlord.", "yes, they sent it. To be with my landlord.", "yes, it was mailed. By, us.", "yes, they sent it. To, him.",
+      "yes, they sent it. To, them.", "yes, they sent it. From, my landlord.", "yes, they mailed it. To, landlord.", "yes, they sent it. From, me.", "yes, it was sent. To , my landlord.",
+      "yes, they sent it. To,my landlord.",
+      "yes, they sent it. It was to my landlord.", "yes, they sent it. It's to my landlord.", "yes, they sent it. That was to my landlord.", "yes, they sent it. That's to my landlord.",
+      "yes, it was sent. It was to the landlord.", "yes, it was sent. It was to him.", "yes, it was sent. It was for my landlord.", "yes, they mailed it. It was by me.", "yes, it was mailed. It was by me.",
+      "yes, they sent it. Plus to my landlord.", "yes, they sent it. Um, so, to my landlord.", "yes, they sent it. So, then to my landlord.", "yes, they sent it. Um, so, then to my landlord.",
+      "yes, they sent it. Well, also, just, then to my landlord.", "yes, they sent it. For them."];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...WINDOW, "Yes, they sent it. Exclusively to my landlord.", "Yes, they sent it. To my other landlord."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: the whitelist's, pinned so they stay
+      // Accepted extra turns: a recipient after the verb in another clause.
+      for (const reply of ["yes, they mailed it. I got it from my landlord on the 3rd.", "yes. They sent it to my landlord."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["yes. They handed it to me.", "yes, they sent it. Right to me.", "yes, they sent it. Over to me."])
+        assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+      assert.match((await at(setup, "yes, they sent it. To my landlord. And to me.")).say, PLAIN, `${setup[0]} → and to me`);   // deliberate: "to me" anywhere after the verb wins
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of WINDOW) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["They sent my notice on September 3. To, my landlord.", "They sent my notice on September 3. Okay, to my landlord.", "They sent my notice on September 3. Okay. To my landlord.",
+        "They sent my notice on September 3. It was to my landlord.", "My notice was mailed on September 3. By, me."]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["They sent it on September 3. To me.", "They sent it on September 3. To, me."]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X39: a comma, semicolon or colon right after to / by / from doesn't hide who it went to: not a
+    // plain yes at the check, end to end from the three entries, the check at the first answer; "To, me." still counts.
+    const COMMA_AFTER = ["Yes, they sent it. To, my landlord.", "Yes, it was mailed. By, me.", "yes, they sent it. To, the landlord.", "yes, they sent it. To: my landlord.", "yes, it was mailed. By; me."];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...COMMA_AFTER, "yes, it was mailed. By me."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      assert.match((await at(setup, "yes, they sent it. To, me.")).say, PLAIN, `${setup[0]} → To, me.`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of COMMA_AFTER) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, THIRTY]) {
+      for (const reply of ["They sent it on September 3. To, my landlord.", "It was mailed on September 3. By, me."]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      counted(await at(setup, "They sent it on September 3. To, me."), `${setup[0]} → To, me.`);
+    }
     for (const setup of LETTERS) for (const reply of ["I got it September 3", "it was received September 3", "dated September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
     counted(await at(WATER, "my notice says it's due September 3"), "water due");
     for (const setup of [DATE, THIRTY, SIXTY_DATE, POWER, RENT]) { const r = await at(setup, "my notice says it's due September 3"); assert.equal(r.d.awaiting, "date", setup[0]); assert.doesNotMatch(r.say, /deadline was|can't end|can't shut off|If the increase/i, setup[0]); }
