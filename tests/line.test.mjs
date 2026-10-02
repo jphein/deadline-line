@@ -270,6 +270,11 @@ test("web: typed fallback over the WebSocket reaches the dialog", async () => {
     assert.equal(msgs[0].text, GREETING);
     ws.send(JSON.stringify({ type: "text", text: "The county says my CalFresh is stopping, the notice is dated September 1st" }));
     await new Promise(r => setTimeout(r, 400));
+    // Words besides the date that aren't the letter's or plain receipt phrasing ("county", "stopping"): the date is read
+    // back first, and the yes counts from it.
+    assert.ok(msgs.some(m => m.type === "line" && /^Just to check: is the date on .* September 1\? Say yes, or give me the date\.$/.test(m.text)));
+    ws.send(JSON.stringify({ type: "text", text: "yes" }));
+    await new Promise(r => setTimeout(r, 400));
     const ans = msgs.find(m => m.type === "line" && /deadline/.test(m.text));
     assert.match(ans.text, /Monday, November 30, 2026/);
     const wav = await fetch(`http://127.0.0.1:${http.address().port}/tts?text=hello`);
@@ -777,6 +782,1018 @@ test("dialog: a yes, no or goodbye that names a letter is about that letter, at 
     }
     // …while an answer the decoder does settle still settles it (the hearing ask's "no" is "not yet").
     assert.equal((await at(["social security denied me again and my hearing is scheduled"], "no")).letter, "ssa-recon");
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a polite no is a no at 'Want me to go on to it?' and at the stop offer; after an answer a goodbye names a carried letter; 'don't hang up' isn't a goodbye", async () => {
+  const mcp = await startMcp();
+  try {
+    const END = "This is general information, not legal advice. Goodbye.";
+    const SALE = `Okay. Don't put off dealing with the Notice of Trustee's Sale. If you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. Call back if you'd like to go over it, or look for free legal help. ${END}`;
+    const NOD = `Okay. Don't put off dealing with the Notice of Default. Call back if you'd like to go over it, or look for free legal help. ${END}`;
+    const offered = async (first, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); const f = await d.handle(first);
+      assert.match(f.say, /Want me to go on to it\?$/); return { ...(await d.handle(reply)), letter: d.letter }; };
+    const SALE_FIRST = "I got a jury summons, plus a notice of trustee's sale", NOD_FIRST = "I got a jury summons, plus a notice of default";
+    // A no with thanks declines the carried letter like "no": its goodbye names it (and, for the sale, says the cutoff).
+    for (const reply of ["no thanks", "no thank you", "no thanks, that's all"]) {
+      assert.deepEqual([(await offered(SALE_FIRST, reply)).say, (await offered(SALE_FIRST, reply)).done], [SALE, true], reply);
+      assert.equal((await offered(NOD_FIRST, reply)).say, NOD, reply);
+    }
+    // A goodbye without a no names the letter too, as after an answer: the sale's cutoff isn't lost on a "bye"; "yes"
+    // still takes the letter up.
+    for (const reply of ["bye", "thanks", "okay bye", "yes, bye"]) {
+      assert.equal((await offered(SALE_FIRST, reply)).say, SALE, reply); assert.equal((await offered(NOD_FIRST, reply)).say, NOD, reply);
+    }
+    // A carried letter that has a date to ask ("What date is on it?"): a no or a goodbye declines it with the goodbye that
+    // names it; a yes with thanks goes on to its date; a date said with thanks is read.
+    const SIXTY_FIRST = "I got a jury summons, I also got a 60 day notice to move out";
+    const DATED = `Okay. You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. ${END}`;
+    const datedAt = async (reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      assert.match((await d.handle(SIXTY_FIRST)).say, /What date is on it\?$/); return { ...(await d.handle(reply)), letter: d.letter }; };
+    for (const reply of ["no thanks", "no thank you, goodbye", "bye", "thanks", "not today, thanks", "no thanks, not today", "no thanks, yesterday was bad enough"])
+      assert.equal((await datedAt(reply)).say, DATED, reply);
+    // A no without thanks or a goodbye isn't a decline there: as at the date question, the letter is taken up and its date
+    // asked, and a second no offers to stop. A relative day said with a no or a "not" is never its date.
+    for (const reply of ["no", "nope", "nah, I'm good", "no, not the 3rd", "no, one second", "no, not September 3", "not today"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle(SIXTY_FIRST);
+      const r = await d.handle(reply);
+      assert.deepEqual([r.say, r.done, d.letter, d.date], ["Okay, about a 60-day notice to move out. What date is on it? You can say something like September 13th.", false, "ca-60day-notice", null], reply);
+      if (reply !== "not today") assert.equal((await d.handle("no")).say, "If you find the date, call back right away: some of these run out in days. Do you want to stop here?", reply);
+    }
+    // At the date question too: a relative day with a no is never the date; said with thanks it is the goodbye, without
+    // it the date is asked again.
+    for (const reply of ["not today, thanks", "no thanks, not today", "no thanks, yesterday was bad enough"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 30 day notice");
+      const r = await d.handle(reply); assert.deepEqual([r.say, d.date], [`Okay. ${END}`, null], reply);
+    }
+    for (const reply of ["not today", "no, not September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 30 day notice");
+      const r = await d.handle(reply); assert.deepEqual([r.done, d.date, d.awaiting], [false, null, "date"], reply);
+    }
+    for (const reply of ["it was September 3", "September 3", "it's September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 30 day notice");
+      assert.match((await d.handle(reply)).say, /^A 30-day notice can't end your tenancy before Saturday, October 3, 2026/, reply);
+      assert.match((await datedAt(reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
+    }
+    // A new letter named instead of the carried one (no yes, no or goodbye in it) comes first; the carried one is kept and
+    // taken up after it, so the sale's cutoff is still said.
+    for (const named of ["I also got a 3 day notice to pay rent or quit", "oh and I also got a 3 day notice dated September 25", "I also got an eviction summons"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle(SALE_FIRST);
+      await d.handle(named); if (!/dated/.test(named)) await d.handle("September 25");
+      assert.deepEqual(d.carry, ["ca-foreclosure-sale"], named);
+      assert.match((await d.handle("no")).say, /^Okay\. A Notice of Trustee's Sale prints the date the home will be sold\./, named);
+    }
+    for (const reply of ["yes thanks", "yes, thank you"]) {
+      const r = await datedAt(reply);
+      assert.deepEqual([r.say, r.done, r.letter], ["Okay, about a 60-day notice to move out. What date is on it? You can say something like September 13th.", false, "ca-60day-notice"], reply);
+    }
+    for (const reply of ["September 3", "it was September 3", "it's September 3"])
+      assert.match((await datedAt(reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
+    // A carried question in the state the page sends (not reached in real flows): a goodbye with a no ends the call, naming it.
+    const asked = new Dialog(mcp.callTool, { today: "2026-09-30" }); Object.assign(asked, { letter: "jury-summons", awaiting: "another", carry: ["ask:a summons or court papers"] });
+    assert.equal((await asked.handle("no thank you, goodbye")).say, `Okay. You also mentioned the summons or court papers: call back right away about it, or look for free legal help. ${END}`);
+    // A different letter named at the offer comes first, and the carried one is kept for after it.
+    const other = new Dialog(mcp.callTool, { today: "2026-09-30" }); await other.handle(NOD_FIRST);
+    assert.equal((await other.handle("before you say goodbye, I also got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?");
+    assert.deepEqual(other.carry, ["ca-foreclosure-nod"]);
+    await other.handle("an eviction");
+    assert.match((await other.handle("September 29")).say, /You also mentioned a Notice of Default; tell me about that next\. Want me to explain how I counted\?$/);
+    const three = new Dialog(mcp.callTool, { today: "2026-09-30" }); await three.handle(NOD_FIRST);
+    await three.handle("yes, and I also got a 3 day notice"); assert.deepEqual([three.letter, three.carry], ["ca-3day", ["ca-foreclosure-nod"]]);
+    // A yes with thanks takes the carried letter up, like "yes" (sale and NOD); a no said with a goodbye is still a decline,
+    // so it keeps the goodbye that names the letter (for the sale, the cutoff is still the one fact to hear).
+    for (const reply of ["yes thanks", "yes please", "yes, thank you"]) {
+      const r = await offered(SALE_FIRST, reply);
+      assert.deepEqual([r.letter, r.done], ["ca-foreclosure-sale", false], reply); assert.match(r.say, /^A Notice of Trustee's Sale prints the date/, reply);
+      assert.match((await offered(NOD_FIRST, reply)).say, /^A Notice of Default starts the foreclosure clock/, reply);
+    }
+    assert.equal((await offered(SALE_FIRST, "no thank you, goodbye")).say, SALE);
+    // A no wins over a yes-word said with it: "yeah no thanks", "okay, no thanks" and "no thanks, okay" decline (the
+    // goodbye names the letter, so a caller who meant yes still hears what to do and can call back). The rule's one
+    // exception, a design choice: a no that ends in a yes ("no, okay go ahead", "no wait, yes") is a self-correction, and
+    // the yes wins.
+    for (const reply of ["yeah no thanks", "okay, no thanks", "sure, no thank you", "no thanks, okay"]) {
+      assert.equal((await offered(SALE_FIRST, reply)).say, SALE, reply); assert.equal((await offered(NOD_FIRST, reply)).say, NOD, reply);
+    }
+    for (const reply of ["no, okay go ahead", "no wait, yes"]) {
+      const r = await offered(SALE_FIRST, reply);
+      assert.deepEqual([r.letter, r.done], ["ca-foreclosure-sale", false], reply); assert.match(r.say, /^A Notice of Trustee's Sale prints the date/, reply);
+      assert.match((await offered(NOD_FIRST, reply)).say, /^A Notice of Default starts the foreclosure clock/, reply);
+    }
+    // "No, don't hang up": the decline, and the line stays open; "yes, please don't hang up" takes the letter up.
+    const staying = await offered(SALE_FIRST, "no, don't hang up");
+    assert.deepEqual([staying.say, staying.done], [SALE.replace(END, "I'm still here: tell me about another letter, or say goodbye when you're done."), false]);
+    assert.equal((await offered(NOD_FIRST, "yes, please don't hang up")).letter, "ca-foreclosure-nod");
+    // Only with a letter offered: "yes thanks" to "Do you have another letter?" is still the plain goodbye, as before.
+    const plain = new Dialog(mcp.callTool, { today: "2026-09-30" }); await plain.handle("I got a jury summons");
+    assert.equal((await plain.handle("yes thanks")).say, `Okay. ${END}`);
+    const yes = await offered(SALE_FIRST, "yes");
+    assert.equal(yes.letter, "ca-foreclosure-sale"); assert.equal(yes.done, false); assert.match(yes.say, /^A Notice of Trustee's Sale prints the date/);
+    // The stop offer ("Do you want to stop here?"): a no to stopping, with thanks or not, asks the date again, since ending
+    // the call on a misread "no" loses the deadline and the caller can still say bye; a yes, a plain goodbye or a goodbye
+    // said outright with the no ("no thank you, goodbye") ends it.
+    const at = async (setup, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t); return { ...(await d.handle(reply)), awaiting: d.awaiting }; };
+    const STOP = ["I got a 30 day notice", "no", "no"];
+    for (const reply of ["no", "nope", "no thanks", "no thank you", "no, that's all", "no thanks, that's all", "nah, I'm good"]) {
+      const r = await at(STOP, reply);
+      assert.deepEqual([r.done, r.awaiting], [false, "date"], reply); assert.match(r.say, /^Okay\. What day was the notice handed to you\?/, reply);
+    }
+    for (const reply of ["yes", "bye", "yes thanks", "okay bye", "thanks", "no thank you, goodbye", "thank you so much, goodbye"])
+      assert.equal((await at(STOP, reply)).say, `Okay. ${END}`, reply);
+    // A negated goodbye ("don't hang up") at the stop offer is a no to stopping: the date again.
+    for (const reply of ["no, don't hang up", "yes, please don't hang up", "don't hang up"]) {
+      const r = await at(STOP, reply);
+      assert.deepEqual([r.done, r.awaiting], [false, "date"], reply); assert.match(r.say, /^Okay\. What day was the notice handed to you\?/, reply);
+    }
+    // After an answer (the explain and text offers), a goodbye never drops a letter the caller also mentioned: it names it,
+    // the way the go-on offer's decline does (an undated one "Don't put off …", the sale with its cutoff; a dated one or a
+    // carried question "call back with its date / about it"). A yes said with a goodbye ("yes, bye", "okay bye", "explain
+    // it, then hang up") is carried out first (the explanation, the text line), then that goodbye.
+    const MORE = ["I got a 3 day notice dated September 28"], TEXT = [...MORE, "yes"];
+    const also = (what) => [`I got a 3 day notice dated September 28, ${what}`];
+    const CB = "Call back if you'd like to go over it, or look for free legal help. ";
+    const TEXTED = "Okay. In the real service I'd text the date and a calendar reminder to this number. ";
+    const STILL = "I'm still here: tell me about another letter, or say goodbye when you're done.";
+    const CARRIES = [
+      [MORE, ""],
+      [also("I also got a 60 day notice to move out"), "You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. "],
+      [also("plus a notice of default"), `Don't put off dealing with the Notice of Default. ${CB}`],
+      [also("plus a notice of trustee's sale"), `Don't put off dealing with the Notice of Trustee's Sale. If you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. ${CB}`],
+      [also("I also got a summons"), "You also mentioned the summons or court papers: call back right away about it, or look for free legal help. "],
+    ];
+    for (const [more, line] of CARRIES) {
+      const text = [...more, "yes"], label = more[0];
+      for (const reply of ["bye", "bye now", "thanks", "no thanks, goodbye", "no thank you, goodbye"])
+        for (const setup of [more, text]) assert.deepEqual([(await at(setup, reply)).say, (await at(setup, reply)).done], [`Okay. ${line}${END}`, true], `${label} / ${setup.length} → ${reply}`);
+      for (const reply of ["okay bye", "yes, bye", "explain it, then hang up"]) {
+        const r = await at(more, reply);
+        assert.match(r.say, /^Here's how I counted\. Served Monday, September 28, 2026\./, reply); assert.ok(r.say.endsWith(`${line}${END}`), `${label} → ${reply}: ${r.say}`); assert.equal(r.done, true);
+      }
+      for (const reply of ["okay bye", "yes, bye"]) assert.deepEqual([(await at(text, reply)).say, (await at(text, reply)).done], [`${TEXTED}${line}${END}`, true], `${label} → ${reply}`);
+      // "Please don't hang up" isn't a goodbye: a yes is a yes, and nothing ends the call.
+      const ex = await at(more, "yes, please don't hang up");
+      assert.match(ex.say, /^Here's how I counted\..* Would you like me to text you the date\?$/); assert.equal(ex.done, false);
+      const tx = await at(text, "yes, please don't hang up");
+      assert.ok(tx.say.startsWith(TEXTED), tx.say); assert.equal(tx.done, false);
+      if (!line) assert.equal(tx.say, `${TEXTED}${STILL}`);
+      for (const reply of ["no, don't hang up", "don't hang up"]) for (const setup of [more, text]) assert.equal((await at(setup, reply)).done, false, `${label} → ${reply}`);
+    }
+    assert.equal((await at(MORE, "no, don't hang up")).say, `Okay. ${STILL}`);
+    // "yes thanks" and "okay" are still a yes at both offers; a plain no with a carried letter still goes on to it.
+    assert.match((await at(MORE, "yes thanks")).say, /^Here's how I counted\..* Would you like me to text you the date\?$/);
+    assert.match((await at(MORE, "okay")).say, /^Here's how I counted\..* Would you like me to text you the date\?$/);
+    assert.equal((await at(TEXT, "yes thanks")).say, `${TEXTED}${END}`);
+    const SIXTY = also("I also got a 60 day notice to move out");
+    assert.match((await at([...SIXTY, "yes"], "okay")).say, /^Okay\. In the real service I'd text the date and a calendar reminder to this number\. Now, about a 60-day notice to move out\./);
+    for (const setup of [SIXTY, [...SIXTY, "yes"]]) assert.match((await at(setup, "no thanks")).say, /^Okay\. Now, about a 60-day notice to move out\./);
+    // "Don't hang up" at the date question isn't a goodbye either.
+    assert.match((await at(["I got a 30 day notice"], "no, don't hang up")).say, /^I still need the date on the letter\./);
+    assert.match((await at(["I got a 30 day notice"], "don't hang up")).say, /^Okay\. What day was the notice handed to you\?/);
+    // A goodbye that names a letter is about the letter (namesLetter, the decoder): the summons question, at every offer.
+    for (const setup of [STOP, MORE, [...SIXTY, "yes"], ["I got a jury summons"]])
+      assert.equal((await at(setup, "before you say goodbye, I also got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?", setup.join(" / "));
+  } finally { await mcp.close(); }
+});
+
+test("dialog: 'thanks, please don't hang up' keeps the open question; a no comes first at the explain and text offers; every carried letter is named", async () => {
+  const mcp = await startMcp();
+  try {
+    const END = "This is general information, not legal advice. Goodbye.";
+    const at = async (setup, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t);
+      const r = await d.handle(reply); return { ...r, d }; };
+    const SIXTY = ["I got a 3 day notice dated September 28, I also got a 60 day notice to move out"];
+    // A stay request with no answer in it keeps what was open (letter, date, carry, stage) and asks its question again;
+    // "I'm still here" only when nothing is open. (At the stop offer it is a no to stopping: the date question.)
+    const STAGES = [
+      [["I got a 30 day notice"], "date", "What day was the notice handed to you? You can say something like September 13th."],
+      [["I got a summons"], "letter", "Is it about an eviction, a lawsuit about money, or jury duty?"],
+      [["I got a 30 day notice", "no", "no"], "date", "What day was the notice handed to you? You can say something like September 13th."],
+      [["I got a 3 day notice dated September 28"], "more", "Want me to explain how I counted?"],
+      [["I got a 3 day notice dated September 28", "yes"], "text", "Would you like me to text you the date?"],
+      [SIXTY, "more", "Want me to explain how I counted?"],
+      [[...SIXTY, "yes"], "text", "Would you like me to text you the date?"],
+      [["I got a jury summons, plus a notice of trustee's sale"], "another", "Want me to go on to it?"],
+      [["I got a jury summons, I also got a 60 day notice to move out"], "another", "What date is on it?"],
+      [["I got a jury summons"], "another", "Do you have another letter I can help with?"],
+    ];
+    for (const [setup, stage, ask] of STAGES) for (const reply of ["thanks, please don't hang up", "thanks, hold on", "thank you, please don\u2019t hang up"]) {
+      const before = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await before.handle(t);
+      const { letter, date, carry } = before;
+      const r = await before.handle(reply);
+      assert.deepEqual([r.say, r.done, before.awaiting], [`Okay. ${ask}`, false, stage], `${setup.join(" / ")} → ${reply}`);
+      if (stage !== "date" || setup.length === 1) assert.deepEqual([before.letter, before.date, before.carry], [letter, date, carry], `${setup.join(" / ")} → ${reply}`);
+    }
+    // …and what was open is still answerable: the carried sale is taken up, the date is read.
+    const kept = await at(["I got a jury summons, plus a notice of trustee's sale", "thanks, please don't hang up"], "yes");
+    assert.match(kept.say, /^A Notice of Trustee's Sale prints the date/);
+    assert.match((await at(["I got a 30 day notice", "thanks, please don't hang up"], "September 25")).say, /^A 30-day notice can't end your tenancy before Sunday, October 25, 2026/);
+    // At the date question, with or without thanks and words after it: the letter is kept, so the date is read for it.
+    for (const reply of ["thanks, don't hang up", "thank you, don't hang up, I'm looking for it", "okay thanks, don't hang up, let me find it", "hold on, don't hang up", "wait, don't hang up"]) {
+      const r = await at(["I got a 30 day notice", reply], "September 25");
+      assert.match(r.say, /^A 30-day notice can't end your tenancy before Sunday, October 25, 2026/, reply);
+    }
+    // A stay that leaves a goodbye behind isn't one ("don't hang up, bye"), and "never mind hang up" (no comma, as ASR
+    // writes it) is a goodbye like "never mind, hang up".
+    for (const setup of [["I got a 30 day notice"], ["I got a 3 day notice dated September 28"], ["I got a jury summons, plus a notice of trustee's sale"], ["I got a jury summons"]])
+      for (const reply of ["never mind hang up", "never mind, hang up", "don't hang up, bye"])
+        assert.equal((await at(setup, reply)).done, true, `${setup.join(" / ")} → ${reply}`);
+    // "Please stay on the line" isn't a yes: the open question again.
+    assert.equal((await at(["I got a 3 day notice dated September 28"], "please stay on the line")).say, "Okay. Want me to explain how I counted?");
+    assert.equal((await at(["I got a jury summons, plus a notice of trustee's sale"], "please stay on the line")).say, "Okay. Want me to go on to it?");
+    // The date question's "no" count is kept too: a second "no" after the stay request offers to stop.
+    assert.equal((await at(["I got a 30 day notice", "no", "thanks, please don't hang up"], "no")).say, "If you find the date, call back right away: some of these run out in days. Do you want to stop here?");
+    assert.equal((await at([], "thanks, please don't hang up")).say, "Okay. I'm still here: tell me about another letter, or say goodbye when you're done.");
+    // A bare "don't hang up", "stay on the line please" or "please don\u2019t hang up" ends the call at no stage, changes
+    // nothing, and asks the open question again (at the stop offer: the date, a no to stopping).
+    for (const [setup, stage, ask] of STAGES) for (const reply of ["don't hang up", "stay on the line please", "please don\u2019t hang up", "hold the line"]) {
+      const r = await at(setup, reply);
+      assert.deepEqual([r.say, r.done, r.d.awaiting], [`Okay. ${ask}`, false, stage], `${setup.join(" / ")} → ${reply}`);
+    }
+    // A stay said with something else in it is read for that: the date, or a letter named.
+    assert.match((await at(["I got a 30 day notice"], "hold on, it was September 25")).say, /^A 30-day notice can't end your tenancy before Sunday, October 25, 2026/);
+    // The curly apostrophe is read as the plain one: "yes, please don\u2019t hang up" is a yes.
+    assert.match((await at(["I got a 3 day notice dated September 28"], "yes, please don\u2019t hang up")).say, /^Here's how I counted\..* Would you like me to text you the date\?$/);
+    // "Before you hang up" isn't a stay: "before you hang up, thanks, goodbye" ends the call; "before you say goodbye, I also
+    // got a summons" still names a letter (the decoder), so it is the summons question.
+    for (const setup of [["I got a 30 day notice"], ["I got a 3 day notice dated September 28"], ["I got a jury summons"]]) {
+      for (const reply of ["before you hang up, thanks, goodbye", "before you hang up, thanks so much"]) assert.equal((await at(setup, reply)).done, true, `${setup.join(" / ")} → ${reply}`);
+      assert.equal((await at(setup, "before you say goodbye, I also got a summons")).say, "Is it about an eviction, a lawsuit about money, or jury duty?", setup.join(" / "));
+    }
+    // At the explain and text offers a no comes first, as at the go-on offer: "okay, no thank you, goodbye" neither explains
+    // nor texts; it ends, naming a letter carried. A no that asks how ("no, how did you count it?") still explains.
+    const LINE60 = "You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. ";
+    // After the "Don't put off" line, free legal help isn't said twice.
+    const REST60 = "You also mentioned the 60-day notice to move out: call back right away with its date. ";
+    for (const [setup, line] of [[["I got a 3 day notice dated September 28"], ""], [["I got a 3 day notice dated September 28", "yes"], ""], [SIXTY, LINE60], [[...SIXTY, "yes"], LINE60]])
+      for (const reply of ["okay, no thank you, goodbye", "yes, no thanks, bye"])
+        assert.deepEqual([(await at(setup, reply)).say, (await at(setup, reply)).done], [`Okay. ${line}${END}`, true], `${setup.join(" / ")} → ${reply}`);
+    assert.match((await at(SIXTY, "okay, no thanks")).say, /^Okay\. Now, about a 60-day notice to move out\./);
+    assert.match((await at(["I got a 3 day notice dated September 28"], "no, how did you count it?")).say, /^Here's how I counted\./);
+    assert.match((await at(["I got a 3 day notice dated September 28"], "no, okay go ahead")).say, /^Here's how I counted\..* Would you like me to text you the date\?$/);
+    // A goodbye after an answer names every letter carried: an undated first one "Don't put off …", then the rest.
+    const pair = new Dialog(mcp.callTool, { today: "2026-09-30" }); await pair.handle("I got a 3 day notice dated September 28");
+    pair.carry = ["jury-summons", "ca-60day-notice"];
+    assert.equal((await pair.handle("bye")).say, `Okay. Don't put off dealing with the jury summons. Call back if you'd like to go over it, or look for free legal help. ${REST60}${END}`);
+    const two = new Dialog(mcp.callTool, { today: "2026-09-30" }); await two.handle("I got a 3 day notice dated September 28");
+    two.carry = ["jury-summons", "ca-60day-notice", "ca-foreclosure-nod"];
+    assert.match((await two.handle("bye")).say, /^Okay\. Don't put off dealing with the jury summons\. .*You also mentioned the 60-day notice to move out and the Notice of Default: call back right away about them\. /);
+    const three = new Dialog(mcp.callTool, { today: "2026-09-30" }); await three.handle("I got a 3 day notice dated September 28");
+    three.carry = ["ca-60day-notice", "ca-30day-notice", "ca-foreclosure-nod"];
+    assert.match((await three.handle("bye")).say, /^Okay\. You also mentioned the 60-day notice to move out, the 30-day notice to move out and the Notice of Default: call back right away about them, or look for free legal help\. /);
+    // The sale's cutoff is said whenever the sale is carried, first or not.
+    const saleSecond = new Dialog(mcp.callTool, { today: "2026-09-30" }); await saleSecond.handle("I got a 3 day notice dated September 28");
+    saleSecond.carry = ["jury-summons", "ca-foreclosure-sale"];
+    assert.equal((await saleSecond.handle("bye")).say, `Okay. Don't put off dealing with the jury summons. Call back if you'd like to go over it, or look for free legal help. You also mentioned the Notice of Trustee's Sale: call back right away about it. For the Notice of Trustee's Sale: if you want to catch up on the loan, the cutoff is generally five business days before the sale date, not the sale date itself. ${END}`);
+    const goOnTwo = new Dialog(mcp.callTool, { today: "2026-09-30" }); Object.assign(goOnTwo, { letter: "jury-summons", awaiting: "another", carry: ["ca-foreclosure-nod", "ca-foreclosure-sale"] });
+    assert.match((await goOnTwo.handle("no thanks")).say, /^Okay\. Don't put off dealing with the Notice of Default\. .*You also mentioned the Notice of Trustee's Sale: .*For the Notice of Trustee's Sale: if you want to catch up on the loan, the cutoff is generally five business days before the sale date/);
+    // "I don't want to hang up" / "I don't need you to hang up" ask the line to stay: a carried letter is taken up, not dropped.
+    for (const reply of ["no, I don't want to hang up", "no, I don't need you to hang up"]) {
+      const r = await at(SIXTY, reply);
+      assert.equal(r.done, false, reply); assert.match(r.say, /^Okay\. Now, about a 60-day notice to move out\./, reply);
+    }
+    assert.equal((await at(["I got a 3 day notice dated September 28"], "I don't want to hang up")).done, false);
+    const undated2 = new Dialog(mcp.callTool, { today: "2026-09-30" }); await undated2.handle("I got a 3 day notice dated September 28");
+    undated2.carry = ["jury-summons", "ca-foreclosure-nod"];
+    assert.match((await undated2.handle("bye")).say, /You also mentioned the Notice of Default: call back right away about it\. /);
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a date is read before any goodbye or stay; 'wait' only as an instruction; a negated yes or a denied date isn't one", async () => {
+  const mcp = await startMcp();
+  try {
+    const END = "This is general information, not legal advice. Goodbye.";
+    const at = async (setup, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t);
+      const r = await d.handle(reply); return { ...r, d }; };
+    const DATE = ["I got a 30 day notice"], STOP = ["I got a 30 day notice", "no", "no"];
+    const SIXTY = ["I got a jury summons, I also got a 60 day notice to move out"], SALE = ["I got a jury summons, plus a notice of trustee's sale"];
+    const THIRTY = /^A 30-day notice can't end your tenancy before Saturday, October 3, 2026/, SIXTY_ANS = /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/;
+    // W1: the date is looked for before any goodbye or stay, at the date question, the stop offer and the carried date
+    // offer; a no correcting the date keeps the letter. (Said with thanks, the date is read back first: commit 5.)
+    for (const reply of ["September 3, thanks, please don't hang up", "no, it was September 3, thanks, please don't hang up", "September 3, thanks"]) {
+      for (const [setup, letter] of [[DATE, "ca-30day-notice"], [STOP, "ca-30day-notice"], [SIXTY, "ca-60day-notice"]]) {
+        const r = await at(setup, reply);
+        assert.match(r.say, /^Just to check: was the (30|60)-day notice to move out handed to you on September 3\? Say yes, or give me the date\.$/, `${setup.length} → ${reply}`);
+        assert.deepEqual([r.d.letter, r.d.date, r.d.awaiting], [letter, "2026-09-03", "date"], reply);
+      }
+      assert.match((await at([...DATE, reply], "yes")).say, THIRTY, reply); assert.match((await at([...SIXTY, reply], "yes")).say, SIXTY_ANS, reply);
+    }
+    // W2: "wait" is a stay only as an instruction ("wait a second", "please wait"), never "I can't wait" or "I'll wait for
+    // the mail": a decline with "I can't wait" ends the call, and "yes, I can't wait" at the stop offer stops.
+    assert.deepEqual([(await at(SALE, "no thanks, I can't wait")).done, (await at(SALE, "no thanks, I can't wait")).d.awaiting], [true, null]);
+    assert.match((await at(SALE, "no thanks, I can't wait")).say, /^Okay\. Don't put off dealing with the Notice of Trustee's Sale\./);
+    assert.equal((await at(STOP, "yes, I can't wait")).say, `Okay. ${END}`);
+    for (const reply of ["I'll wait for the mail", "I'm waiting on the letter", "I couldn't wait", "I'll hold on to the letter", "we should wait for the mail"]) assert.equal((await at(["I got a 3 day notice dated September 28"], reply)).d.staying, false, reply);
+    for (const [setup, ask] of [[DATE, "What day was the notice handed to you? You can say something like September 13th."], [SALE, "Want me to go on to it?"], [["I got a 3 day notice dated September 28"], "Want me to explain how I counted?"]])
+      for (const reply of ["wait a second", "please wait", "wait"]) assert.equal((await at(setup, reply)).say, `Okay. ${ask}`, reply);
+    // W3: a no that ends in a negated yes is a no: "no, I'm not saying yes", "no, not yes" decline; "no, okay go ahead" and
+    // "no wait, yes" still accept.
+    for (const reply of ["no, I'm not saying yes", "no, not yes", "no, don't go ahead"]) {
+      const r = await at(SALE, reply); assert.equal(r.done, true, reply); assert.match(r.say, /^Okay\. Don't put off dealing with the Notice of Trustee's Sale\./, reply);
+      assert.equal((await at(["I got a 3 day notice dated September 28"], reply)).say, `Okay. ${END}`, reply);
+    }
+    for (const reply of ["no, okay go ahead", "no wait, yes"]) assert.equal((await at(SALE, reply)).d.letter, "ca-foreclosure-sale", reply);
+    // W4: a date denied in the same breath isn't a date (the decoder reads "September 3"): at the carried date offer it is a
+    // decline, at the date question and the stop offer the date is asked again, and after an answer the date stays.
+    assert.equal((await at(SIXTY, "no thanks, September 3 isn't the date")).say, `Okay. You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. ${END}`);
+    assert.match((await at(SIXTY, "September 3 is not the date")).say, /^Okay, about a 60-day notice to move out\. What date is on it\?/);
+    for (const [setup, again] of [[DATE, /^I still need the date on the letter\./], [STOP, /^(I still need the date on the letter\.|Okay\.) What day was the notice handed to you\?/]])
+      for (const reply of ["no thanks, September 3 isn't the date", "September 3 is not the date"]) {
+        const r = await at(setup, reply); assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], reply); assert.match(r.say, again, reply);
+      }
+    assert.match((await at(["I got a 3 day notice dated September 28"], "September 3 is not the date")).say, /^Your deadline is Thursday, October 1, 2026\./);
+    // N3: at an open date question a no said with a stay is a no to hanging up, not to the letter: the question stays.
+    for (const [setup, ask] of [[DATE, "What day was the notice handed to you? You can say something like September 13th."], [SIXTY, "What date is on it?"]])
+      for (const reply of ["no thanks, don't hang up", "no, please don't hang up"]) {
+        const r = await at(setup, reply); assert.equal(r.done, false, reply); assert.ok(r.say.endsWith(ask.replace(/^What date is on it\?$/, "What date is on it?")) || r.say.includes(ask), `${reply}: ${r.say}`);
+        assert.ok(["date", "another"].includes(r.d.awaiting), reply);
+      }
+    const kept = await at(DATE, "no thanks, don't hang up"); assert.equal(kept.d.letter, "ca-30day-notice");
+    // N-b: "I don't want you to hang up" is a stay with nothing else in it: the open question again.
+    assert.equal((await at(["I got a 3 day notice dated September 28"], "I don't want you to hang up")).say, "Okay. Want me to explain how I counted?");
+    assert.equal((await at(DATE, "we don't want you to hang up")).say, "Okay. What day was the notice handed to you? You can say something like September 13th.");
+  } finally { await mcp.close(); }
+});
+
+test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read back before anything is counted from it", async () => {
+  const mcp = await startMcp();
+  try {
+    const END = "This is general information, not legal advice. Goodbye.";
+    const at = async (setup, reply) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t);
+      const r = await d.handle(reply); return { ...r, d }; };
+    const DATE = ["I got a 3 day notice"], STOP = ["I got a 3 day notice", "no", "no"], SIXTY = ["I got a jury summons, I also got a 60 day notice to move out"];
+    const MORE = ["I got a 3 day notice dated September 25"], TEXT = [...MORE, "yes"];
+    const STAGES = [[DATE, "the 3-day notice"], [STOP, "the 3-day notice"], [SIXTY, "the 60-day notice to move out"]];
+    const CHECK = (letter, day) => `Just to check: was ${letter} handed to you on ${day}? Say yes, or give me the date.`;
+    const DECLINED = `Okay. You also mentioned the 60-day notice to move out: call back right away with its date, or look for free legal help. ${END}`;
+    const asked = (r, reply) => assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], reply);
+    // (1) A date with a negation, a hedge, a thanks or goodbye word, or a "?" is read back, never counted from; the date
+    // is held for the answer to the check.
+    for (const reply of ["no thanks, it wasn't September 3", "no thanks, it isn't September 3", "thanks, but it wasn't September 3", "no thanks, I don't think it was September 3",
+      "no thanks, not sure it was September 3", "maybe September 3", "no thanks, maybe September 3", "September 3?", "September 3, thanks", "September 3, bye"])
+      for (const [setup, letter] of [...STAGES, [MORE, "the 3-day notice"], [TEXT, "the 3-day notice"]]) {
+        const r = await at(setup, reply);
+        assert.deepEqual([r.say, r.done, r.d.date, r.d.awaiting], [CHECK(letter, "September 3"), false, "2026-09-03", "date"], `${setup.join(" / ")} → ${reply}`);
+      }
+    // …"yes" counts from it (with a goodbye too), a new date is used, "no" asks the date again (a second "no" offers to
+    // stop), a goodbye ends, a stay request asks the check again, and "say that again" repeats it.
+    const HELD = [...DATE, "September 3, thanks"];
+    for (const reply of ["yes", "yes, bye", "yes, it was September 3"]) assert.match((await at(HELD, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    assert.match((await at(HELD, "September 5")).say, /^That deadline was Thursday, September 10, 2026\./);
+    const no = await at(HELD, "no"); assert.equal(no.say, "Okay. What date is on it? You can say something like September 13th."); asked(no, "no");
+    assert.match((await at([...HELD, "no"], "no")).say, /Do you want to stop here\?$/);
+    assert.equal((await at(HELD, "bye")).say, `Okay. ${END}`);
+    for (const reply of ["thanks, please don't hang up", "say that again"]) assert.match((await at(HELD, reply)).say, /Just to check: was the 3-day notice handed to you on September 3\? Say yes, or give me the date\.$/, reply);
+    assert.match((await at([...SIXTY, "September 3, thanks"], "yes")).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/);
+    // …and the held date survives the page's round trip (cleanState keeps the stage and the date).
+    const { decodeHandlers } = await import("../src/handlers.js");
+    const h = decodeHandlers({ callTool: mcp.callTool }); let state = null, said = "";
+    for (const transcript of ["I got a 3 day notice", "September 3, thanks", "yes"]) {
+      const r = await (await h.POST(new Request("https://demo.example/api/decode", { method: "POST", body: JSON.stringify({ transcript, state, today: "2026-09-30" }) }))).json();
+      state = r.state; said = r.say;
+    }
+    assert.match(said, /^That deadline was Wednesday, September 9, 2026\./);
+    // "say that again" on the round trip rebuilds the check from the state (the line said last isn't kept).
+    state = null;
+    for (const transcript of ["I got a 3 day notice", "September 3, thanks", "say that again"]) {
+      const r = await (await h.POST(new Request("https://demo.example/api/decode", { method: "POST", body: JSON.stringify({ transcript, state, today: "2026-09-30" }) }))).json();
+      state = r.state; said = r.say;
+    }
+    assert.equal(said, "Just to check: was the 3-day notice handed to you on September 3? Say yes, or give me the date.");
+    // (2) A bare date (no marker at all) is counted from directly.
+    for (const reply of ["September 3", "it was September 3", "it's September 3", "actually it was September 3"]) {
+      assert.match((await at(DATE, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+      assert.match((await at(SIXTY, reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
+      assert.match((await at(MORE, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);   // a correction re-dates
+    }
+    // (3) Two dates, one taken back: the other one is the one read back (a negation in the turn means a check, never a
+    // direct count); its plain yes counts from it. So does "no, it was September 3" (W-b: one extra turn, the safe side).
+    for (const [reply, day, want] of [["it wasn't September 3, it was September 25", "September 25", /^Your deadline is Wednesday, September 30, 2026\./], ["no, it was not the 3rd, it was September 5", "September 5", /^That deadline was Thursday, September 10, 2026\./],
+      ["September 25, not September 3", "September 25", /^Your deadline is Wednesday, September 30, 2026\./], ["not today, it was September 3", "September 3", /^That deadline was Wednesday, September 9, 2026\./],
+      ["no, it was September 3", "September 3", /^That deadline was Wednesday, September 9, 2026\./], ["not September 2, September 3", "September 3", /^That deadline was Wednesday, September 9, 2026\./]])
+      for (const setup of [DATE, STOP, MORE]) {
+        assert.equal((await at(setup, reply)).say, CHECK("the 3-day notice", day), `${setup.join(" / ")} → ${reply}`);
+        assert.match((await at([...setup, reply], "yes")).say, want, `${setup.join(" / ")} → ${reply} → yes`);
+      }
+    for (const reply of ["no, it was September 3", "September 3, but that's wrong", "September 3, no that's wrong"])
+      assert.equal((await at(SIXTY, reply)).say, CHECK("the 60-day notice to move out", "September 3"), reply);
+    const re = new Dialog(mcp.callTool, { today: "2026-09-30" }); re.letter = "ca-3day";   // the decoder picked the denied one
+    assert.deepEqual(await re.dateTurn("no, not September 3, it was September 5", { suggested_notice_date: "2026-09-03" }), { kind: "confirm", date: "2026-09-05" });
+    // After an answer, a reply whose only date is taken back isn't a correction: it is the offer's own no ("no, not
+    // September 3" at "Want me to explain how I counted?" is the goodbye).
+    assert.equal((await at(MORE, "no, not September 3")).say, `Okay. ${END}`);
+    // A date taken back outright, or the other letter's: the date is asked again.
+    for (const reply of ["September 3? no", "no, not September 3", "I got it on September 3, no wait, that's the other letter", "September 3, wrong letter"])
+      for (const setup of [DATE, STOP]) asked(await at(setup, reply), reply);
+    // A date the decoder can't read ("February 30", "the 3rd"): asked again, never a goodbye or a deadline.
+    for (const reply of ["February 30, thanks", "thanks, it was served on the 3rd", "not until September 3"]) {
+      for (const setup of [DATE, STOP]) asked(await at(setup, reply), reply);
+      assert.match((await at(SIXTY, reply)).say, /^Okay, about a 60-day notice to move out\. What date is on it\?/, reply);
+      const m = await at(MORE, reply); asked(m, reply); assert.match(m.say, /^I still need the date on the letter\./, reply);
+    }
+    // (4) A relative day with a no, a "not" or a plan is never the date: with thanks or a goodbye it is the goodbye (the
+    // carried letter named), without them the date is asked again; with a past receipt and thanks it is read back; alone
+    // it is the date.
+    for (const reply of ["thanks, I'll look for it today", "thanks, I'll find it later today", "thank you, I'll get back to you today", "I'll look for it today, bye",
+      "no thanks, yesterday I got 2 calls", "no thanks, yesterday may be wrong", "not today, thanks", "thanks, I'll call back tomorrow", "thanks, I'll call back tonight",
+      "okay thanks, I'll check this afternoon", "thanks, I'll call back Monday", "thanks, I'll call back next week"]) {
+      assert.equal((await at(DATE, reply)).say, `Okay. ${END}`, reply);
+      // At the stop offer a "no thanks" is a no to stopping (the date again), the stop offer's own rule; never a date.
+      const st = await at(STOP, reply);
+      if (/^no thanks/.test(reply)) asked(st, reply); else assert.equal(st.say, `Okay. ${END}`, reply);
+      assert.equal((await at(SIXTY, reply)).say, DECLINED, reply);
+    }
+    for (const reply of ["I'll look for it today", "no, today", "not today"]) { asked(await at(DATE, reply), reply); asked(await at(SIXTY, reply), reply); }
+    for (const reply of ["thank you, I got it yesterday", "it came yesterday, thanks"])
+      for (const [setup, letter] of [...STAGES, [MORE, "the 3-day notice"]]) assert.equal((await at(setup, reply)).say, CHECK(letter, "September 29"), `${setup.join(" / ")} → ${reply}`);
+    for (const reply of ["yesterday", "I got it yesterday"]) {
+      assert.match((await at(DATE, reply)).say, /^Your deadline is Friday, October 2, 2026\./, reply);
+      assert.match((await at(SIXTY, reply)).say, /^A 60-day notice can't end your tenancy before Saturday, November 28, 2026/, reply);
+    }
+    // (6) A goodbye said outright is honored even when a date is denied (only thanks yields to a denial); a stay keeps it.
+    for (const reply of ["goodbye, yesterday isn't the date", "goodbye, September 3 isn't the date"]) {
+      for (const setup of [DATE, STOP]) assert.equal((await at(setup, reply)).say, `Okay. ${END}`, reply);
+      assert.equal((await at(SIXTY, reply)).say, DECLINED, reply);
+    }
+    assert.equal((await at(["I got a 3 day notice, I also got a 60 day notice to move out"], "goodbye, yesterday isn't the date")).say, DECLINED);
+    asked(await at(DATE, "no thanks, September 3 isn't the date"), "thanks yields");
+    assert.equal((await at(DATE, "yesterday isn't the date, please don't hang up")).done, false);
+    // X1: a date denied with "is not correct" / "is wrong" is asked again, at every stage and at the check.
+    const CHECKED = [...DATE, "September 3, thanks"];
+    for (const reply of ["September 3 is not correct", "September 3 is not right", "September 3 is wrong"]) {
+      for (const setup of [DATE, STOP, CHECKED]) asked(await at(setup, reply), reply);
+      assert.match((await at(SIXTY, reply)).say, /^Okay, about a 60-day notice to move out\. What date is on it\?/, reply);
+    }
+    // …while a "not" that isn't attached to the date is still a marker: read back ("I'm not sure, September 3").
+    for (const [setup, letter] of [...STAGES, [CHECKED, "the 3-day notice"]]) assert.equal((await at(setup, "I'm not sure, September 3")).say, CHECK(letter, "September 3"));
+    // Rule C: a chatty restatement of the held date gets the check once more, then the date is asked.
+    for (const reply of ["I'm not sure, September 3", "I believe September 3"]) {
+      const twice = await at([...CHECKED, reply], reply); asked(twice, `twice: ${reply}`);
+    }
+    // X2: the markers apply to any date the decoder reads, lexical candidate or not ("Maybe 2026-09-03"; a spoken ordinal
+    // once the decoder reads it); a date neither can read with thanks is asked again, not a goodbye.
+    const x2 = new Dialog(mcp.callTool, { today: "2026-09-30" }); x2.letter = "ca-3day";
+    assert.deepEqual(await x2.dateTurn("Maybe 2026-09-03", { suggested_notice_date: "2026-09-03" }), { kind: "confirm", date: "2026-09-03" });
+    assert.deepEqual(await x2.dateTurn("September third, I think", { suggested_notice_date: "2026-09-03" }), { kind: "confirm", date: "2026-09-03" });
+    // (A date read only by the decoder can't be told apart from the words around it: read back, the safe side.)
+    assert.deepEqual(await x2.dateTurn("September third", { suggested_notice_date: "2026-09-03" }), { kind: "confirm", date: "2026-09-03" });
+    assert.deepEqual(await x2.dateTurn("no, September third", { suggested_notice_date: "2026-09-03" }), { kind: "confirm", date: "2026-09-03" });   // W-b, decoder-only
+    for (const setup of [DATE, STOP]) for (const reply of ["2026-09-03, thanks", "Maybe 2026-09-03"]) asked(await at(setup, reply), reply);
+    // X3: at the check, a yes with a new day in it is read as that day, never the held one.
+    // (Said with a yes, the new day isn't bare, so it is the one read back.)
+    for (const [reply, day] of [["Yes, actually it was yesterday", "September 29"], ["yes, it was today", "September 30"]]) {
+      const r = await at(CHECKED, reply); assert.equal(r.say, CHECK("the 3-day notice", day), reply);
+      assert.match((await at([...CHECKED, reply], "yes")).say, day === "September 29" ? /^Your deadline is Friday, October 2, 2026\./ : /^Your deadline is Monday, October 5, 2026\./, reply);
+    }
+    // X4 / P1: at the check a yes is a plain one. A negated, hedged or questioning answer is never a yes ("I'm not sure",
+    // "that's not right", "right?", "yes?", "yes, maybe"): the date is asked again. "sure, I guess" and "yeah, I think
+    // so" are yeses.
+    const HELD60 = [...SIXTY, "September 3, thanks"];
+    for (const reply of ["I'm not sure", "not sure", "that's not right", "right?", "yes?", "Yes, maybe", "not really", "I don't think so", "I don't know", "probably", "maybe", "no thanks"])
+      for (const setup of [CHECKED, [...STOP, "September 3, thanks"], HELD60]) asked(await at(setup, reply), `${setup.length} → ${reply}`);
+    for (const reply of ["that's right", "correct", "yep", "yes it was September 3"]) {
+      assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+      assert.match((await at(HELD60, reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
+    }
+    // P2: the check starts the "no" count afresh: a "no" before it doesn't turn a correction into the stop offer.
+    const NOFIRST = [...DATE, "no thanks, it wasn't September 3"];
+    assert.equal((await at(NOFIRST, "no, it was September 25")).say, CHECK("the 3-day notice", "September 25"));
+    assert.match((await at([...NOFIRST, "no, it was September 25"], "yes")).say, /^Your deadline is Wednesday, September 30, 2026\./);
+    asked(await at(NOFIRST, "no thanks"), "P2 no thanks");
+    asked(await at(NOFIRST, "no, yesterday"), "P2 no, yesterday");   // not the stop offer
+    assert.match((await at([...NOFIRST, "no thanks"], "no")).say, /Do you want to stop here\?$/);
+    // A no that only takes a date back is still a no: a second no offers to stop.
+    assert.match((await at([...DATE, "no, not September 3"], "no")).say, /Do you want to stop here\?$/);
+    // …and a second no that carries a date is that date, not the stop offer.
+    assert.equal((await at([...DATE, "no"], "no, it was September 25")).say, CHECK("the 3-day notice", "September 25"));
+    assert.match((await at([...DATE, "no"], "no thanks, it wasn't September 3")).say, /^Just to check: was the 3-day notice handed to you on September 3\?/);
+    // P3: the check asks for the day that counts, in the letter's own words.
+    const named = async (first, date) => (await at([first], date)).say;
+    assert.equal(await named("I got a 30 day notice", "September 3, thanks"), "Just to check: was the 30-day notice to move out handed to you on September 3? Say yes, or give me the date.");
+    assert.equal(await named("I got a summons for a lawsuit about money", "September 3, thanks"), "Just to check: were the papers handed to you on September 3? Say yes, or give me the date.");
+    assert.equal(await named("I got a parking ticket", "September 3, thanks"), "Just to check: is the date on the ticket September 3? Say yes, or give me the date.");
+    assert.equal(await named("I got an eviction summons", "September 3, thanks"), "Just to check: were the eviction court papers handed to you on September 3? Say yes, or give me the date.");
+    const held = async (letter) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); Object.assign(d, { letter, date: "2026-09-03" }); return d.confirmQuestion(); };
+    assert.equal(await held("ca-sheriff-vacate"), "Just to check: was the sheriff's notice handed to you or posted on your door on September 3? Say yes, or give me the date.");
+    assert.equal(await held("ssa-initial"), "Just to check: is the date on the Social Security denial September 3? Say yes, or give me the date.");
+    assert.equal(await held("ca-water-shutoff"), "Just to check: was the unpaid water bill due on September 3? Say yes, or give me the date.");
+    // Two days said, neither taken back: the decoder's is read back, never counted from directly.
+    for (const reply of ["the notice says September 3 but I got it September 5", "it was September 3 or 4"])
+      for (const setup of [DATE, STOP]) { const r = await at(setup, reply); assert.match(r.say, /^Just to check: was the 3-day notice handed to you on September [345]\?/, reply); assert.equal(r.d.awaiting, "date"); }
+    // X8: "<date> was a mistake / is a mistake / was wrong / was incorrect" take the date back.
+    const HEARD = (r, reply) => assert.match(r.say, /^Just to check: .* on September 3\? Say yes, or give me the date\.$/, reply);
+    for (const reply of ["September 3 was a mistake", "September 3 is a mistake", "September 3 was wrong", "September 3 was incorrect"]) {
+      for (const setup of [DATE, STOP]) asked(await at(setup, reply), reply);
+      assert.match((await at(SIXTY, reply)).say, /^Okay, about a 60-day notice to move out\. What date is on it\?/, reply);
+    }
+    // X9: a plan said with an explicit date is read back, not counted from.
+    for (const reply of ["I plan to collect the notice on September 3", "I'll pick it up on September 3", "I'm getting it September 3"])
+      for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    // X10: a receipt verb inside a plan or a wish isn't a receipt; a past receipt still counts.
+    // (Never counted: the check, or the date asked again; only the check's plain yes gives a deadline.)
+    const notCounted = (r, reply) => { assert.equal(r.d.awaiting, "date", reply); assert.equal(r.done, false, reply); assert.match(r.say, /^(Just to check: |I still need the date|Okay[.,] )/, reply); };
+    for (const reply of ["I hope to have it delivered today", "it should be delivered today", "it will be served today"])
+      for (const setup of [DATE, STOP, SIXTY]) notCounted(await at(setup, reply), reply);
+    // W-c: "today" with a receipt is read back (only a bare "today" counts directly); its yes counts from it.
+    for (const reply of ["it was delivered today", "they delivered it today", "they served it today", "they left it on my door today"]) {
+      for (const setup of [DATE, STOP]) {
+        assert.equal((await at(setup, reply)).say, CHECK("the 3-day notice", "September 30"), reply);
+        assert.match((await at([...setup, reply], "yes")).say, /^Your deadline is Monday, October 5, 2026\./, reply);
+      }
+      assert.equal((await at(SIXTY, reply)).say, CHECK("the 60-day notice to move out", "September 30"), reply);
+    }
+    // …"I left it at home today", "I found it today", "I saw it today" aren't receipts: asked again.
+    for (const reply of ["I left it at home today", "I found it today", "I saw it today", "I found it yesterday"]) for (const setup of [DATE, STOP, SIXTY]) {
+      notCounted(await at(setup, reply), reply);
+    }
+    // X11: two days kept besides one taken back are read back; one kept day besides one taken back is used directly.
+    for (const reply of ["Not September 2; September 3 or September 5", "September 3 or the 5th", "September 3 or September 5"])
+      for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    for (const setup of [DATE, STOP]) assert.equal((await at(setup, "not September 2, September 3")).say, CHECK("the 3-day notice", "September 3"));
+    // X12: the uncertainty family is a hedge: read back.
+    for (const reply of ["September 3, if I remember correctly", "I believe September 3", "I want to say September 3", "around September 3", "about September 3",
+      "roughly September 3", "September 3 or so", "something like September 3", "approximately September 3", "September 3, give or take", "September 3-ish"])
+      for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    for (const reply of ["September 3", "it was September 3"]) for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // W-a: at the check, never counted from without a plain yes. A letter named with a no, a goodbye or no yes-word clears
+    // the held date and is taken as at the date question; with a plain yes the date counts and the letter is carried.
+    for (const reply of ["no, but I also got a summons", "before you say goodbye, I also got a summons", "I also got a summons"]) {
+      const r = await at(CHECKED, reply);
+      assert.deepEqual([r.say, r.d.date, r.d.awaiting], ["Is it about an eviction, a lawsuit about money, or jury duty?", null, "letter"], reply);
+    }
+    const ud = await at(CHECKED, "thanks, I also got an eviction summons");
+    assert.deepEqual([ud.d.letter, ud.d.date, ud.d.awaiting], ["ca-ud", null, "date"]); assert.match(ud.say, /^Got it: California: court papers for an eviction/);
+    const both = await at(CHECKED, "yes, and I also got a summons");
+    assert.match(both.say, /^That deadline was Wednesday, September 9, 2026\..*You also mentioned a summons or court papers; tell me about that next\./);
+    // W-b: any negation or denial word anywhere with a date: never counted from directly (the check, or asked again when
+    // the date is taken back).
+    for (const reply of ["September 3 is incorrect", "September 3 was a mistake"]) {
+      for (const setup of [DATE, STOP, CHECKED]) asked(await at(setup, reply), reply);
+      assert.match((await at(SIXTY, reply)).say, /^Okay, about a 60-day notice to move out\. What date is on it\?/, reply);
+    }
+    for (const reply of ["September 3, but that's wrong", "September 3, no that's wrong", "September 3, not sure that's it", "September 3, never mind"])
+      for (const setup of [DATE, STOP, CHECKED, SIXTY]) HEARD(await at(setup, reply), `${setup.length} → ${reply}`);
+    // …and after an answer, "September 3 is not correct" isn't a yes to the offer (the answer is read again, not explained).
+    for (const setup of [MORE, TEXT]) assert.doesNotMatch((await at(setup, "September 3 is not correct")).say, /^Here's how I counted|In the real service/);
+    // A wish said with a relative day (even with a receipt verb) is never counted from: the check or the date again.
+    for (const reply of ["I'm hoping it was delivered yesterday", "I want to know if it was delivered yesterday", "my landlord wants to say it was served yesterday",
+      "it was supposed to be delivered yesterday", "I expect it was delivered yesterday", "I was waiting for it, it came yesterday", "I hope it was delivered yesterday", "it should have been delivered yesterday"])
+      notCounted(await at(DATE, reply), reply);
+    // Rule A: the whitelist, counted directly at the date question, the stop offer and the carried date offer.
+    for (const reply of ["September 3", "it was September 3", "on September 3", "the date is September 3", "dated September 3", "I got it on September 3",
+      "I received it September 3", "they served it September 3", "it was served on September 3", "it was handed to me September 3", "the landlord gave it to me on September 3"]) {
+      for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+      assert.match((await at(SIXTY, reply)).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/, reply);
+    }
+    for (const reply of ["yesterday", "it was yesterday", "I got it yesterday", "today", "it was today"]) assert.match((await at(DATE, reply)).say, /^Your deadline is (Friday, October 2|Monday, October 5), 2026\./, reply);
+    // The whitelist set the gates replay: counted directly at the date question, the stop offer, the carried date offer and
+    // the check (a bare new date there replaces the held one); a stay request is taken out before the bare test.
+    for (const reply of ["September 3", "September 3rd", "the 3rd of September", "it was September 3", "on September 3", "dated September 3", "I got it September 3",
+      "they served it on September 3", "the landlord gave it to me on September 3", "please don't hang up, September 3", "yesterday", "it was yesterday"])
+      for (const setup of [DATE, STOP, SIXTY, [...DATE, "September 5, thanks"]]) {
+        const r = await at(setup, reply);
+        assert.match(r.say, /^(That deadline was Wednesday, September 9, 2026|Your deadline is Friday, October 2, 2026|A 60-day notice can't end your tenancy before (Monday, November 2|Saturday, November 28), 2026)/, `${setup.join(" / ")} → ${reply}`);
+      }
+    // X13: on a letter-naming turn every word is read; a hedge or a denial before the date's clause sends it to the check.
+    const first = async (text) => { const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); return d.handle(text); };
+    for (const text of ["Maybe, I got a 3 day notice on September 3", "I'm not sure, I got a 3 day notice on September 3", "My 3-day notice dated September 3 is wrong"])
+      assert.match((await first(text)).say, /^(Just to check: was the 3-day notice handed to you on September 3\?|I still need the date|Got it: California: a 3-day notice)/, text);
+    assert.match((await first("I got a 3 day notice on September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    assert.match((await first("I got a letter from Social Security dated September 13th, they denied my disability again")).say, /^Your deadline is/);
+    // A hedge before a naming turn's date is read, on a first turn and at the date question.
+    for (const text of ["I'm not sure, my 3 day notice is dated September 3", "I'm not sure. My 3 day notice is dated September 3", "not sure, I got a 3 day notice dated September 3",
+      "maybe, I got a 3 day notice dated September 3", "I got a 3 day notice, it was due September 3"])
+      assert.match((await first(text)).say, /^Just to check: was the 3-day notice handed to you on September 3\?/, text);
+    for (const reply of ["I'm not sure, the 3 day notice is dated September 3", "not sure. the 3 day notice is dated September 3", "maybe, the 3 day notice says September 3",
+      "September 3, September 5", "I got it September 3, the notice says September 1"]) HEARD(await at(DATE, reply), reply);
+    assert.match((await first("I got a 3 day notice to pay rent or quit dated September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    assert.match((await at(DATE, "the 3 day notice is dated September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    assert.match((await at(["they're turning off my water"], "it was due September 3")).say, /^Most water systems can't shut off your water before Monday, November 2, 2026/);
+    // X14: "due" and "printed" are hand-over letters' chat: the check; for a printed-date letter "printed" is plain.
+    for (const reply of ["The notice is due September 3", "The date printed on the notice is September 3"]) for (const setup of [DATE, STOP]) notCounted(await at(setup, reply), reply);
+    for (const reply of ["it was due September 3", "the date printed on it is September 3"]) for (const setup of [DATE, STOP]) HEARD(await at(setup, reply), reply);
+    for (const setup of [DATE, STOP]) assert.match((await at(setup, "yesterday or today")).say, /^Just to check: .* on September 29\? /);   // two relative days
+    const ssa = new Dialog(mcp.callTool, { today: "2026-09-30" }); await ssa.handle("I got a letter from Social Security, they denied my disability again");
+    assert.match((await ssa.handle("the date printed on it is September 3")).say, /^(Your deadline is|That deadline was)/);
+    // X15: a second date of any kind in the reply sends the first to the check.
+    for (const reply of ["It was September 3 and yesterday", "September 3, or was it yesterday"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    // X16: at the check, a yes with anything more than yes words, thanks or a goodbye isn't a plain yes: the date again.
+    for (const reply of ["Yes, that is the due date", "yes, that's when it's due", "yes, the date on it"]) asked(await at(CHECKED, reply), reply);
+    // (Ten such yeses, at the 3-day, 30-day and 60-day checks; the hedged yeses too: never a deadline.)
+    const TEN = ["Yes, that is the due date", "yes, that's when it's due", "yes, the date on it", "yes, that's the rent due date", "yes, that's the printed date",
+      "yes, that's when I paid", "yes, that's the wrong one", "yes, about then", "yes I guess", "yes, I believe so", "sure, I guess", "yeah I think so", "yes, I think so"];
+    for (const [setup, held] of [[CHECKED, "3-day"], [["I got a 30 day notice", "September 3, thanks"], "30-day"], [HELD60, "60-day"]])
+      for (const reply of TEN) { const r = await at(setup, reply); assert.equal(r.done, false, `${held} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end your tenancy/i, `${held} → ${reply}`); }
+    // End to end from three entries (a denied date, a thanked date, a paid date): the check, then a yes with more words,
+    // is never a deadline.
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"])
+      for (const reply of TEN) {
+        const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice");
+        assert.match((await d.handle(entry)).say, /^Just to check: was the 3-day notice handed to you on September 3\?/, entry);
+        const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(r.done, false, `${entry} → ${reply}`);
+      }
+    for (const setup of [DATE, STOP]) assert.match((await at(setup, "yesterday, today")).say, /^Just to check: /);   // two relative days
+
+    for (const reply of ["yes", "yes, thanks", "yes, bye", "yes it was", "yes, September 3"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // X17: a letter named with a yes at the check: the letter's words aside, the rest must still be a plain yes; if it
+    // isn't, the date is asked again and the letter carried. "yes, and I also got a summons" counts, then carries.
+    for (const [reply, carried] of [["Yes, that is the due date. I also got a 30 day notice.", "ca-30day-notice"], ["yes, but that's the due date, and I also got a summons", "ask:a summons or court papers"]]) {
+      const r = await at(CHECKED, reply);
+      assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], reply); assert.doesNotMatch(r.say, /deadline/i, reply); assert.ok(r.d.carry.includes(carried), reply);
+    }
+    const yesAnd = await at(CHECKED, "yes, and I also got a summons");
+    assert.match(yesAnd.say, /^That deadline was Wednesday, September 9, 2026\./); assert.deepEqual(yesAnd.d.carry, ["ask:a summons or court papers"]);
+    // X17 at all six classes, and end to end from three entries: a named letter with a yes that isn't plain never counts
+    // the held date; the letter is carried. "yes, and I also got a summons" counts, then carries.
+    const CLASSES = [CHECKED, ["I got a 30 day notice", "September 3, thanks"], HELD60, ["I got eviction papers", "September 3, thanks"],
+      ["they're turning off my water", "September 3, thanks"], ["I got a letter from Social Security, they denied my disability again", "September 3, thanks"]];
+    for (const setup of CLASSES) {
+      for (const reply of ["yes, that's the wrong one, and I also got a summons", "yes, that's when I paid, I also got a 3 day notice"]) {
+        const r = await at(setup, reply);
+        assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end|shut off your water/i, `${setup[0]} → ${reply}`);
+      }
+      const ok = await at(setup, "yes, and I also got a summons");
+      assert.doesNotMatch(ok.say, /^(Okay\. |I still need|Just to check)/, setup[0]); assert.ok(ok.d.carry.includes("ask:a summons or court papers"), setup[0]);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle("yes, that's the wrong one, and I also got a summons");
+      assert.doesNotMatch(r.say, /deadline/i, entry); assert.deepEqual([d.date, d.carry], [null, ["ask:a summons or court papers"]], entry);
+    }
+    // The receipt words after a yes count only with a receipt verb; never "due", "paid" or a bare "that's the day".
+    for (const reply of ["yes, that's the day I got it", "yes, that's the day they gave it to me"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    for (const reply of ["yes, that's when I paid", "yes, that's the day"]) asked(await at(CHECKED, reply), reply);
+    // X19: a yes followed by plain receipt phrasing still counts; the due date still doesn't.
+    for (const reply of ["Yes, that's when I got it", "yes, that's when they handed it to me"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    asked(await at(CHECKED, "Yes, that is the due date"), "due at the check");
+    // X20: "handed it over", "dropped it off" are plain receipts.
+    for (const reply of ["They handed it over to me on September 3", "they dropped it off September 3"]) for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // X18: the caller's own sending isn't the day it reached them: the check; a receipt in the third person stays direct.
+    for (const reply of ["I sent the notice to my landlord on September 3", "I mailed it to the landlord September 3"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    for (const reply of ["they sent it September 3", "it was sent to me September 3", "the landlord mailed it September 3", "I was handed it on September 3"])
+      for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // X22: at the check, the caller's own sending isn't a plain yes (the named letter still carried); X23: "sent" by them
+    // is a receipt.
+    asked(await at(CHECKED, "Yes, I mailed it to my landlord"), "X22");
+    const mailed = await at(CHECKED, "Yes, I mailed it to my landlord. I also got a 30 day notice.");
+    assert.deepEqual([mailed.d.date, mailed.d.awaiting, mailed.d.carry], [null, "date", ["ca-30day-notice"]]); assert.doesNotMatch(mailed.say, /deadline/i);
+    asked(await at(CHECKED, "Yes, I sent it to my landlord"), "X23 own send");
+    for (const reply of ["Yes, that's when they sent it to me", "Yes, that's when they handed it to me"]) assert.match((await at(CHECKED, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    const sentAnd = await at(CHECKED, "Yes, that's when they sent it to me, I also have a 30 day notice");
+    assert.match(sentAnd.say, /^That deadline was Wednesday, September 9, 2026\./); assert.deepEqual(sentAnd.d.carry, ["ca-30day-notice"]);
+    // X21: a sending said the other way round ("received notice from me", "got it from me") goes to the check.
+    for (const reply of ["My landlord received notice from me on September 3", "the landlord got it from me September 3"]) for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), reply);
+    // X24 (decided, after the legal read): "my notice says <date>" is direct for the 3-day notice (and printed-date
+    // letters); for the 30-day, 60-day and sheriff's notices, which commonly print the move-out date, it goes to the check;
+    // "dated <date>" stays direct for all of them. "I received it from my landlord on September 3" stays direct.
+    for (const setup of [DATE, STOP]) for (const reply of ["My notice says September 3", "the notice says September 3", "I received it from my landlord on September 3"])
+      assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    for (const reply of ["My notice says September 3", "it says September 3"]) HEARD(await at(SIXTY, reply), reply);
+    assert.match((await at(SIXTY, "dated September 3")).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/);
+    assert.match((await at(SIXTY, "I received it from my landlord on September 3")).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/);
+    const sheriff = new Dialog(mcp.callTool, { today: "2026-09-30" }); await sheriff.handle("I got a notice to vacate from the sheriff");
+    HEARD({ ...(await sheriff.handle("it says September 3")), d: sheriff }, "sheriff says");
+    assert.equal(sheriff.letter, "ca-sheriff-vacate");
+    // "Yes, they sent it to me then" is a plain receipt yes; "the landlord received it September 3" is the caller's sending.
+    assert.match((await at(CHECKED, "yes, they sent it to me then")).say, /^That deadline was Wednesday, September 9, 2026\./);
+    for (const setup of [DATE, STOP]) HEARD(await at(setup, "the landlord received it September 3"), "landlord received");
+    // X18c / X22 at the six classes and end to end: the caller's own sending at the check is never a plain yes.
+    for (const setup of CLASSES) for (const reply of ["yes, that's when I mailed it", "Yes, I mailed it to my landlord", "Yes, I mailed it to my landlord. I also got a 30 day notice."]) {
+      const r = await at(setup, reply);
+      assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end|shut off your water/i, `${setup[0]} → ${reply}`);
+      if (/30 day/.test(reply) && setup[0] !== "I got a 30 day notice") assert.ok(r.d.carry.includes("ca-30day-notice"), `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle("yes, that's when I mailed it"); assert.doesNotMatch(r.say, /deadline/i, entry); assert.equal(d.date, null, entry);
+    }
+    // X25 / X26: the caller's own sending through "have / 've", or in the passive ("received by my landlord"), goes to the
+    // check, at the date question, the stop offer and the dated-carry offer, and isn't a plain yes at the check; a receipt
+    // said that way ("I have been handed it", "I've received it", "I've got it", "it was received by me") stays direct.
+    const SIXTY_DATE = ["I got a 60 day notice"], HELD_60 = [...SIXTY, "September 3, thanks"];
+    for (const reply of ["I have sent my landlord notice on September 3", "I've mailed it to the landlord on September 3", "My notice was received by my landlord on September 3", "it was received by the landlord September 3"])
+      for (const setup of [DATE, STOP, SIXTY, SIXTY_DATE]) HEARD(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const reply of ["I have been handed it on September 3", "I was handed it September 3", "I've received it September 3", "I have received it on September 3", "I've got it September 3", "it was received September 3", "it was received by me September 3"])
+      for (const setup of [DATE, STOP, SIXTY, SIXTY_DATE]) assert.match((await at(setup, reply)).say, /^(That deadline was Wednesday, September 9, 2026|A 60-day notice can't end your tenancy before Monday, November 2, 2026)/, `${setup[0]} → ${reply}`);
+    for (const setup of [CHECKED, HELD_60]) {
+      for (const reply of ["Yes, I have sent my landlord notice", "yes, I've mailed it to my landlord", "Yes, my notice was received by my landlord"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      asked(await at(setup, "yes, I have it"), `${setup[0]} → yes, I have it`);   // having it isn't its date
+    }
+    // X25 / X26 for the 3-day, 30-day and 60-day letters at the date question, the stop offer, the dated-carry offer and
+    // the check, and end to end from the three entries.
+    const THIRTY = ["I got a 30 day notice"], HELD_30 = [...THIRTY, "September 3, thanks"];
+    const SENDS = ["I have sent my landlord notice on September 3", "we have sent it September 3", "I've mailed it to the landlord on September 3", "I had mailed it September 3",
+      "My notice was received by my landlord on September 3", "it was received by the landlord September 3", "it was delivered to my landlord September 3"];
+    for (const reply of SENDS) for (const setup of [DATE, STOP, THIRTY, SIXTY, SIXTY_DATE]) HEARD(await at(setup, reply), `${setup[0]} → ${reply}`);
+    const YES_SENDS = ["Yes, I have sent my landlord notice", "yes, I've mailed it to my landlord", "yes, we've sent it", "Yes, my notice was received by my landlord", "yes, it was received by the landlord then"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of YES_SENDS) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of YES_SENDS) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`);
+    }
+    const PLAIN = /^(That deadline was Wednesday, September 9, 2026|A (30|60)-day notice can't end your tenancy before (Saturday, October 3|Monday, November 2), 2026)/;
+    for (const reply of ["I have received it on September 3", "it was received September 3", "I received it from my landlord on September 3", "I've got it September 3", "I have been handed it September 3"])
+      for (const setup of [DATE, STOP, THIRTY, SIXTY]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, I have received it", "yes, it was received then", "Yes, that's when they sent it to me", "yes, I've received it", "yes, I've got it"])
+      assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    // H1: "have" / "has" name a date to act by ("it has to be September 3", "I have to be out by September 3"): the check;
+    // "it has September 3 on it", "I have it dated September 3" are plain.
+    for (const reply of ["it has to be September 3", "it has to be by September 3", "I have to be out by September 3", "we have to be out September 3", "I have to pay by September 3",
+      "it has to be paid by September 3", "they have it as September 3", "has to be September 3 I guess", "I have to get it September 3"])
+      for (const setup of [DATE, STOP, SIXTY]) HEARD(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const reply of ["it has to be September 3", "it has to be by September 3"]) { const r = await at(CHECKED, reply); assert.doesNotMatch(r.say, /deadline/i, reply); }
+    for (const reply of ["it has September 3 on it", "I have it dated September 3"]) for (const setup of [DATE, STOP]) assert.match((await at(setup, reply)).say, /^That deadline was Wednesday, September 9, 2026\./, reply);
+    // "says <date>" for the letters that state a later date of their own: the check (one row each); "dated" stays plain;
+    // the water bill's "it was due September 3" stays plain.
+    for (const [first, reply] of [["they're turning off my water", "my notice says September 3"], ["they're going to shut off my electricity", "it says September 3"], ["my landlord is raising my rent", "my notice says September 3"],
+      ["my landlord is opting out of Section 8", "it says September 3"], ["they repossessed my car", "the notice says September 3"]]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle(first);
+      const r = await d.handle(reply); assert.match(r.say, /^Just to check: /, `${d.letter} → ${reply}`);
+    }
+    assert.match((await at(["they're turning off my water"], "it was due September 3")).say, /^Most water systems can't shut off your water before Monday, November 2, 2026/);
+    assert.match((await at(SIXTY_DATE, "dated September 3")).say, /^A 60-day notice can't end your tenancy before Monday, November 2, 2026/);
+    // X27: a send verb with a recipient after it in its clause (a recipient noun, or "to <someone>"), whoever the subject
+    // and whatever adverbs stand between, is the caller's sending: the check at the first answer, and never a plain yes at
+    // the check; "to me / us" (or "me" after the verb) is a receipt; the passive counts only "to <someone>".
+    const WATER = ["they're turning off my water"], RENT = ["my landlord is raising my rent"];
+    for (const reply of ["I also just sent my landlord notice on September 3", "I then mailed it to my landlord September 3", "I first gave it to the manager on September 3",
+      "we finally dropped it at the office September 3", "I also just sent it September 3", "they sent it to my landlord September 3", "it was mailed over to the landlord September 3",
+      "they sent my landlord the notice on September 3"])
+      for (const setup of [DATE, STOP, THIRTY, SIXTY, SIXTY_DATE, WATER, RENT]) HEARD(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, I also just sent my landlord notice", "yes, they sent it to my landlord", "yes, I then mailed it to the landlord"])
+      asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+    const PLAIN27 = /^(That deadline was Wednesday, September 9, 2026|A (30|60)-day notice can't end your tenancy before (Saturday, October 3|Monday, November 2), 2026|Most water systems can't shut off your water before Monday, November 2, 2026|If the increase is 10 percent or less)/;
+    for (const reply of ["they also sent it to me September 3", "they gave me my landlord notice on September 3", "I was handed it by the landlord September 3", "it was handed to me September 3",
+      "I came and they handed it to me on September 3"])   // another clause; another subject
+      for (const setup of [DATE, STOP, THIRTY, SIXTY_DATE, WATER, RENT]) assert.match((await at(setup, reply)).say, PLAIN27, `${setup[0]} → ${reply}`);
+    // A recipient anywhere after a send verb, even in another clause, is the check: one extra turn.
+    for (const setup of [DATE, STOP, THIRTY, SIXTY_DATE, WATER, RENT]) HEARD(await at(setup, "they mailed it on September 3 and the landlord came by"), `${setup[0]} → landlord came by`);
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, they just gave it to me", "yes, they also sent it to me", "yes, the landlord then handed it to me", "yes, they gave me my landlord notice"])
+      assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    // X28: for the letters that state a later date, "says" and up to five words in the same clause before the date ("says
+    // by", "says to be out by") is the check, or the date again, never counted from; "dated" stays plain, the 3-day's "says
+    // by" / "says" stay plain (decided), a clause break or more than five words between stay plain, and so does the rent
+    // increase one-shot.
+    for (const reply of ["My notice says by September 3", "it says before September 3", "it says until September 3", "the notice says to be out by September 3"])
+      for (const setup of [DATE, WATER, SIXTY_DATE, RENT]) {
+        const r = await at(setup, reply);
+        assert.equal(r.done, false, `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline|can't end your tenancy|can't shut off|If the increase/i, `${setup[0]} → ${reply}`);
+      }
+    for (const setup of [WATER, SIXTY_DATE, RENT]) HEARD(await at(setup, "My notice says by September 3"), `${setup[0]} → says by`);
+    for (const reply of ["dated September 3", "it says, I got it on September 3", "the notice says it was handed to me by my landlord on September 3"])
+      for (const setup of [WATER, SIXTY_DATE, RENT]) assert.match((await at(setup, reply)).say, PLAIN27, `${setup[0]} → ${reply}`);
+    assert.match((await at(DATE, "my notice says September 3")).say, /^That deadline was Wednesday, September 9, 2026\./);   // decided
+    // A deadline preposition right before the date ("by", "before", "until", "no later than", "on or before", "by the")
+    // is a date to act by, for every letter, after "says" or not: the check; for the water bill "says it's due <date>" is
+    // its due date (plain), elsewhere not counted; "I got it / it was received / dated <date>" stay plain everywhere.
+    const heldAt = (r, m) => { assert.match(r.say, /^Just to check: /, m); assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, "2026-09-03", "date"], m); };
+    const counted = (r, m) => { assert.doesNotMatch(r.say, /^Just to check|I still need/, m); assert.equal(r.d.date, "2026-09-03", m); assert.notEqual(r.d.awaiting, "date", m); };
+    const SHERIFF = ["I got a notice to vacate from the sheriff"], POWER = ["they're going to shut off my electricity"];
+    const LETTERS = [DATE, THIRTY, SIXTY_DATE, SHERIFF, WATER, POWER, RENT];
+    for (const setup of LETTERS) for (const reply of ["My notice says by September 3", "my notice says no later than September 3", "it says on or before September 3", "I have to be out by September 3",
+      "the notice says to be out by September 3", "it says the shutoff is September 3", "it's by September 3", "the deadline is before the 3rd of September"]) {
+      const r = await at(setup, reply);
+      assert.equal(r.done, false, `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline was|can't end your tenancy|can't shut off|If the increase|^Got it/i, `${setup[0]} → ${reply}`);
+    }
+    for (const setup of LETTERS) for (const reply of ["My notice says by September 3", "my notice says no later than September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [THIRTY, SIXTY_DATE, SHERIFF, WATER, POWER, RENT]) for (const reply of ["my notice says it is September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [DATE, SIXTY_DATE, WATER, RENT]) for (const reply of ["by September 3", "pay by September 3", "I have to be out by September 3", "My notice says by September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [DATE, SIXTY_DATE, WATER, RENT]) for (const reply of ["on September 3", "it was received by me September 3", "handed to me on September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);   // "by me" is the agent
+    // X29: a comma doesn't end the recipient / agent search; X30: "to me" after a send verb wins over a source noun; X31:
+    // a receipt verb between "says" and the date is a receipt.
+    for (const setup of [DATE, SIXTY_DATE, WATER]) {
+      for (const reply of ["They sent my notice on September 3, to my landlord.", "My notice was mailed on September 3, by me.", "they sent it on September 3 to my landlord", "my notice says by September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["they sent it to me on September 3,", "They handed my notice from my landlord to me on September 3", "I got my notice from my landlord on September 3",
+        "My notice says I received this on September 3", "the notice says it was served on September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    for (const setup of [SIXTY_DATE, WATER]) heldAt(await at(setup, "my notice says September 3"), `${setup[0]} → says`);
+    // X32: a verbless fragment after a break (". ; ! ..." or and / but) that starts with to / by / from belongs to the
+    // clause before it: not a plain yes at the check, end to end from the three entries; the check at the first answer.
+    const FRAGMENTS = ["yes, they sent it; to my landlord", "yes, they sent it. To my landlord.", "yes, they sent it! To my landlord.", "yes, they sent it... to my landlord",
+      "yes, they sent it and to my landlord", "yes, they sent it. By me.", "yes, it was mailed. By me.", "yes, it was mailed; by me"];
+    const TO_ME_YES = ["yes, they sent it. To me.", "yes. They sent it to me.", "yes, they sent it to me"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of FRAGMENTS) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of TO_ME_YES) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of FRAGMENTS) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY, SIXTY_DATE]) {
+      for (const reply of ["They sent my notice on September 3. To my landlord.", "They sent my notice on September 3! To my landlord.", "They sent my notice on September 3 and to my landlord.",
+        "They sent my notice on September 3... to my landlord.", "It was mailed on September 3. By me.",
+        "They sent it on September 3, over to my landlord", "It was mailed on September 3, actually by me",
+        "They sent it on September 3, the notice to my landlord", "It was mailed on September 3, the notice by me"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      counted(await at(setup, "They sent my notice on September 3. To me."), `${setup[0]} → to me`);
+      heldAt(await at(setup, "They mailed it on September 3. From my landlord we got it."), `${setup[0]} → a subject later in the clause`);   // only a clause that opens with its subject ends the search: one extra turn
+    }
+    // X36: the fragment may open with up to three fillers or adverbs ("And to", "Over to", "Just by", "Um, by"), fillers go
+    // with their commas ("By, uh, me."), and a blank clause never takes it: not a plain yes at the check, end to end from the
+    // three entries; "to me", "handed to me", "came from my landlord" still count.
+    const OPENED = ["yes, they sent it. And to my landlord.", "yes, they sent it. Over to my landlord.", "yes, it was mailed. Just by me.", "yes, it was mailed. Um, by me.", "yes, it was mailed. By, uh, me."];
+    const STILL = ["yes, they sent it. To me.", "yes. It was handed to me.", "yes, it came. From my landlord.", "yes, they mailed it. To me, from my landlord."];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of OPENED) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of STILL) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of OPENED) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    // X35: "given" after "says" is a receipt only with an object or "to me" ("I was given September 3" may be "given
+    // until"): the check at every letter, the 3-day too; "given it", "given to me" stay plain, "given until" isn't counted.
+    const SUBSIDY = ["my landlord is opting out of Section 8"], REPO = ["they repossessed my car"], SSA = ["Social Security denied my disability"],
+      EDD = ["I got an EDD determination"], UD = ["I got an unlawful detainer"], CIVIL = ["I got a summons for a lawsuit about money"];
+    for (const setup of [DATE, THIRTY, SIXTY_DATE, SHERIFF, WATER, POWER, RENT, SUBSIDY, REPO, SSA, EDD, UD, CIVIL]) {
+      for (const reply of ["My notice says I was given September 3.", "it says I was given on September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["it says I was given it on September 3", "the notice says it was given to me on September 3", "the notice says it was given to me September 3", "it says I was given notice on September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+      const r = await at(setup, "my notice says I was given until September 3"); assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], `${setup[0]} → given until`);
+    }
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, I was given it then", "yes, it was given to me then"]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    // X32g: the fragment may take any determiner or none ("To landlord.", "To that landlord.") before a pronoun or a
+    // recipient noun: not a plain yes at the check, end to end from the three entries; a reply that already isn't a
+    // plain yes ("To management.", "I sent it", no break) stays asked; "to be honest", "to the best of my knowledge" stay the check.
+    const BARE = ["yes, they sent it. Over to my landlord.", "yes, they sent it. To landlord.", "yes, they sent it. To that landlord."];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of [...BARE, "yes, they sent it. Back to my landlord.", "yes, they sent it. To management.", "yes, they sent it. To landlords.",
+      "yes, they sent it. To your office.", "yes, I sent it. To landlord.", "yes, they sent it to landlord"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of BARE) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, THIRTY]) {
+      counted(await at(setup, "They sent it on September 3. To me."), `${setup[0]} → to me`);
+      for (const reply of ["they sent it September 3. To be honest I don't know.", "they sent it September 3. To the best of my knowledge.", "They sent it on September 3. To landlord."]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X37: punctuation between the last word and the date ("says: September 3", "says by: September 3", "given. September
+    // 3") doesn't skip the stated-date, deadline-preposition or "given" tests; the bare "says" stays scoped to the letters
+    // that state a later date; "given a date of" is still "given" with no object; "until:" still reads no date.
+    for (const setup of [DATE, THIRTY]) {
+      for (const reply of ["My notice says by: September 3", "it says by: September 3", "My notice says I was given: September 3.", "my notice says I was given a date of September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      counted(await at(setup, "it says I was given it. September 3."), `${setup[0]} → given it.`);
+      const until = await at(setup, "it says until: September 3"); assert.deepEqual([until.done, until.d.date, until.d.awaiting], [false, null, "date"], `${setup[0]} → until:`);
+    }
+    heldAt(await at(THIRTY, "my notice says: September 3"), "30-day says:");
+    counted(await at(DATE, "my notice says: September 3"), "3-day says:");   // decided: the bare "says" is for the letters that state a later date
+    // X40 / X32h: a send verb with someone it went to anywhere after it in the turn (not only in its own clause), read
+    // with punctuation as spaces, is not a plain yes at the check, end to end from the three entries, and the check at the
+    // first answer; "to me / us" anywhere after the verb wins.
+    const WINDOW = ["yes, they sent it. Okay, to my landlord.", "yes, they sent it. Yeah, to my landlord.", "yes, they sent it. On to my landlord.", "yes, they sent it. Okay. To my landlord.",
+      "yes, they sent it. Yes. To my landlord.", "yes, they sent it. That's it. To my landlord.", "yes, they sent it. Here. To my landlord.", "yes, they sent it. Well, um, actually, so, to my landlord.",
+      "yes, they sent it. To. My landlord.", "yes, they sent it to. My landlord.", "yes, they sent it. To be with my landlord.", "yes, it was mailed. By, us.", "yes, they sent it. To, him.",
+      "yes, they sent it. To, them.", "yes, they sent it. From, my landlord.", "yes, they mailed it. To, landlord.", "yes, they sent it. From, me.", "yes, it was sent. To , my landlord.",
+      "yes, they sent it. To,my landlord.",
+      "yes, they sent it. It was to my landlord.", "yes, they sent it. It's to my landlord.", "yes, they sent it. That was to my landlord.", "yes, they sent it. That's to my landlord.",
+      "yes, it was sent. It was to the landlord.", "yes, it was sent. It was to him.", "yes, it was sent. It was for my landlord.", "yes, they mailed it. It was by me.", "yes, it was mailed. It was by me.",
+      "yes, they sent it. Plus to my landlord.", "yes, they sent it. Um, so, to my landlord.", "yes, they sent it. So, then to my landlord.", "yes, they sent it. Um, so, then to my landlord.",
+      "yes, they sent it. Well, also, just, then to my landlord.", "yes, they sent it. For them.", "yes, they sent it. They said to my landlord."];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...WINDOW, "Yes, they sent it. Exclusively to my landlord.", "Yes, they sent it. To my other landlord."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: the whitelist's, pinned so they stay
+      // Accepted extra turns: a recipient after the verb in another clause.
+      for (const reply of ["yes, they mailed it. I got it from my landlord on the 3rd.", "yes. They sent it to my landlord."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["yes. They handed it to me.", "yes, they sent it. Right to me.", "yes, they sent it. Over to me.", "yes, my landlord gave it to me", "yes, it came. From my landlord."])   // "came" isn't a send verb
+        assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+      assert.match((await at(setup, "yes, they sent it. To my landlord. And to me.")).say, PLAIN, `${setup[0]} → and to me`);   // deliberate: "to me" anywhere after the verb wins
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of WINDOW) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["They sent my notice on September 3. To, my landlord.", "They sent my notice on September 3. Okay, to my landlord.", "They sent my notice on September 3. Okay. To my landlord.",
+        "They sent my notice on September 3. It was to my landlord.", "My notice was mailed on September 3. By, me."]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["They sent it on September 3. To me.", "They sent it on September 3. To, me."]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X41: a recipient named before the send verb (a to / for phrase, or a cleft with the "to" stranded: "it was my
+    // landlord they sent it to"), or served by it ("they served my landlord"), is still a recipient: not a plain yes at the
+    // check, end to end, and the check at the first answer; a bare noun before the verb ("the landlord mailed it") isn't one,
+    // and "they served me", "I was served" stay receipts.
+    const BEFORE_VERB = ["yes, to my landlord they sent it", "yes, for my landlord they mailed it", "yes, it was my landlord they sent it to", "yes, they served my landlord", "yes, they served it to my landlord"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...BEFORE_VERB, "yes, to the manager it was sent", "yes, it was the manager they mailed it to", "yes, they sent it to my landlord's house",
+        "yes, they forwarded it to my landlord", "yes, they sent it to my landlord. A different notice was sent to me."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: the whitelist's, pinned so they stay
+      // Two events, a yes plus a receipt, the same reading as "To my landlord. And to me.": counts.
+      for (const reply of ["yes, they sent it to my landlord and they gave it to me", "yes, they sent it to my landlord and my landlord gave it to me", "yes, they served me", "yes, I was served",
+        "yes, it was me they sent it to"]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of BEFORE_VERB) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["To my landlord they sent it on September 3", "For my landlord they mailed it September 3", "They served my landlord on September 3", "It was my landlord they sent it to on September 3"])
+        heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["the landlord mailed it September 3", "I was handed it by the landlord September 3", "it was served on me September 3", "they served me September 3", "I was served by the landlord September 3"])
+        counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X45 / X46: at the check, a yes whose remainder names a recipient (a source "by / from <noun>" aside) is not plain
+    // unless the notice came to the caller ("to me / us"): arrival and serving at someone ("it came to my landlord", "it
+    // was served on my landlord", "I served my landlord") are asked again, at the check, end to end, and at the first answer.
+    const NAMED = ["yes, it came to my landlord", "yes, it got to my landlord", "yes, it was served on my landlord", "yes, I served my landlord", "yes, I served it on the landlord",
+      "yes, they served it to my landlord", "yes, my landlord they sent it to"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of NAMED) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      // Accepted extra turns: a recipient named with no "to me" ("my landlord sent it" may be the caller's own notice).
+      for (const reply of ["yes, my landlord sent it", "yes, the landlord did", "yes, I also just actually well sent it"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      // A yes plus a receipt ("to me" later in the turn): counts; if wrong it errs early, the safe direction.
+      for (const reply of ["yes, the landlord handed it to me", "yes, my landlord sent it to me", "yes, I got it from my landlord", "yes, I was handed it by the landlord", "yes, it was sent to me and to my landlord",
+        "yes, they sent it to my landlord. Then they sent it to me.", "yes, they sent it to my landlord. It was sent to me.", "yes, it was me they handed it to", "yes, to me they sent it"])
+        assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of NAMED) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["I served my landlord September 3", "it was served on my landlord September 3", "it came to my landlord September 3", "we also just actually also sent it September 3", "I served it September 3"])
+        heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["it was me they handed it to on September 3", "it came to me September 3", "I got it from my landlord September 3", "the landlord served me September 3"])
+        counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X39: a comma, semicolon or colon right after to / by / from doesn't hide who it went to: not a
+    // plain yes at the check, end to end from the three entries, the check at the first answer; "To, me." still counts.
+    const COMMA_AFTER = ["Yes, they sent it. To, my landlord.", "Yes, it was mailed. By, me.", "yes, they sent it. To, the landlord.", "yes, they sent it. To: my landlord.", "yes, it was mailed. By; me."];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...COMMA_AFTER, "yes, it was mailed. By me."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      assert.match((await at(setup, "yes, they sent it. To, me.")).say, PLAIN, `${setup[0]} → To, me.`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of COMMA_AFTER) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, THIRTY]) {
+      for (const reply of ["They sent it on September 3. To, my landlord.", "It was mailed on September 3. By, me."]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      counted(await at(setup, "They sent it on September 3. To, me."), `${setup[0]} → To, me.`);
+    }
+    for (const setup of LETTERS) for (const reply of ["I got it September 3", "it was received September 3", "dated September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    counted(await at(WATER, "my notice says it's due September 3"), "water due");
+    for (const setup of [DATE, THIRTY, SIXTY_DATE, POWER, RENT]) { const r = await at(setup, "my notice says it's due September 3"); assert.equal(r.d.awaiting, "date", setup[0]); assert.doesNotMatch(r.say, /deadline was|can't end|can't shut off|If the increase/i, setup[0]); }
+    // The passive "by me / us / my husband ..." after a send verb is the caller's side sending: the check, and never
+    // a plain yes; "to me", "to me by the landlord", "given to me then" stay plain. Any run of adverbs before a send verb.
+    for (const setup of [DATE, STOP, THIRTY, SIXTY, SIXTY_DATE]) for (const reply of ["it was mailed by me September 3", "it was sent by us September 3", "it was dropped off by my husband September 3",
+      "I only recently mailed it September 3", "we also finally gave it to them September 3", "I also actually even just sent it September 3",
+      "I um actually also just mailed it September 3", "I um uh sent it September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, it was mailed by me", "yes, it was sent by my lawyer", "yes, it was dropped off by us"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [DATE, STOP, THIRTY, SIXTY_DATE]) for (const reply of ["I was given until September 3", "they've given me till September 3"]) {
+      const r = await at(setup, reply); assert.notEqual(r.d.awaiting === "date" ? "held" : r.d.date, "2026-09-03", `${setup[0]} → ${reply}`); assert.doesNotMatch(r.say, /deadline was|can't end/i, `${setup[0]} → ${reply}`); }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY_DATE]) for (const reply of ["it was mailed to me September 3", "it was handed to me by the landlord September 3", "it was given to me September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, it was given to me then", "yes, it was mailed to me"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    // End to end from the three denied entries: "yes, it was mailed by me" is never counted.
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle("yes, it was mailed by me"); assert.doesNotMatch(r.say, /deadline/i, entry); assert.equal(d.date, null, entry);
+    }
+    { const d = new Dialog(mcp.callTool, { today: "2026-09-30" });
+      assert.match((await d.handle("my landlord says my rent is going up, the notice was handed to me on September 15th")).say, /^If the increase is 10 percent or less/); assert.equal(d.date, "2026-09-15"); }
+    // Rule B / C: one row of every family, at the check too, is never counted from (the check or the date again).
+    for (const reply of ["no, but I also got a summons", "September 3 is incorrect", "September 3, but that's wrong", "they left it on my door today", "I left it at home today",
+      "September 3 was a mistake", "I'll pick it up on September 3", "I'm getting it September 3", "I hope to have it delivered today", "it should be delivered today",
+      "Not September 2; September 3 or September 5", "September 3 or the 5th", "September 3, if I remember correctly", "I believe September 3", "around September 3",
+      "about September 3", "roughly September 3", "September 3 or so", "something like September 3", "approximately September 3", "September 3, give or take", "September 3-ish",
+      "I think September 3", "I want to say September 3", "no, it was September 3"])
+      for (const setup of [DATE, STOP, SIXTY, CHECKED]) {
+        const r = await at(setup, reply);
+        assert.equal(r.done, false, `${setup.length} → ${reply}`);
+        assert.doesNotMatch(r.say, /deadline|can't end your tenancy/i, `${setup.length} → ${reply}`);
+      }
+    // A bare stay request at the check repeats the check with the date held.
+    for (const reply of ["please don't hang up", "hold on", "don't hang up"]) {
+      const r = await at(CHECKED, reply);
+      assert.deepEqual([r.say, r.d.date, r.d.awaiting], ["Okay. Just to check: was the 3-day notice handed to you on September 3? Say yes, or give me the date.", "2026-09-03", "date"], reply);
+    }
+    // Each plan word alone rules a relative day out, even with a receipt verb in the turn.
+    for (const reply of ["I got it today and I need to look for the date", "I got it today and I need to find the date", "I got it today, let me check the date",
+      "I got it today, I can call back", "I got it today, I can get back to you", "I got it today, I can tell you later", "I got it today, the date will be on it",
+      "I got it today, I'll see", "I got it today, we'll see", "I got it today, I'm going to read it", "I got it today, gonna read it", "I got it today, I plan to read it",
+      "I got it today, planning to read it", "I got a call today, I need to collect it", "I got a call today, I need to pick it up"])
+      asked(await at(DATE, reply), reply);
+    // A relative day said with chat ("my hearing is today") is never counted from directly (the bare rule).
+    for (const setup of [DATE, STOP]) notCounted(await at(setup, "my hearing is today"), "bare rule");
+    // No check for a letter that has no date to count from: at the go-on offer the sale is taken up as before.
+    const sale = await at(["I got a jury summons, plus a notice of trustee's sale"], "I think September 3");
+    assert.match(sale.say, /^A Notice of Trustee's Sale prints the date/); assert.equal(sale.d.letter, "ca-foreclosure-sale");
+    // X6: the plan words ("plan", "collect", "pick it up") rule a relative day out, with or without a receipt verb.
+    for (const reply of ["I plan to get it today", "I'll pick it up today", "I need to collect it today"]) for (const setup of [DATE, STOP]) asked(await at(setup, reply), reply);
+    // X6: a relative day is the date only with a past receipt or on its own; a plan to collect it is asked again (with
+    // thanks, the goodbye).
+    for (const reply of ["I plan to collect the notice today", "I'm picking it up today", "I'll get it from the office today"]) {
+      for (const setup of [DATE, STOP, CHECKED]) asked(await at(setup, reply), reply);
+      assert.match((await at(SIXTY, reply)).say, /^Okay, about a 60-day notice to move out\. What date is on it\?/, reply);
+    }
+    assert.equal((await at(DATE, "thanks, I'm picking it up today")).say, `Okay. ${END}`);
+    assert.equal((await at(SIXTY, "thanks, I'm picking it up today")).say, DECLINED);
+    for (const [reply, want] of [["today", /^Your deadline is Monday, October 5, 2026\./], ["it was yesterday", /^Your deadline is Friday, October 2, 2026\./], ["the landlord gave it to me yesterday", /^Your deadline is Friday, October 2, 2026\./]])
+      for (const setup of [DATE, STOP, CHECKED]) assert.match((await at(setup, reply)).say, want, `${setup.length} → ${reply}`);
+    // X5 (a safe false reject, kept): a receipt said with a later plan isn't taken.
+    asked(await at(DATE, "I received it yesterday, and I'll read it again later"), "X5");
+    // X7: every goodbye phrase is a read-back marker too ("that's all", "that is all").
+    for (const reply of ["September 3, that's all", "September 3, that is all"])
+      for (const [setup, letter] of [...STAGES, [CHECKED, "the 3-day notice"]]) assert.equal((await at(setup, reply)).say, CHECK(letter, "September 3"), `${setup.length} → ${reply}`);
+    // B2: a failed detection at the date question or the carried date offer: a goodbye is still a goodbye (no 500).
+    for (const mode of ["throw", "undefined"]) for (const setup of [DATE, SIXTY]) for (const reply of ["bye", "thanks", "September 3, thanks"]) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); for (const t of setup) await d.handle(t);
+      d.call = async (name, args) => { if (name === "detect_letter") { if (mode === "throw") throw new Error("engine down"); return undefined; } return mcp.callTool(name, args); };
+      assert.equal((await d.handle(reply)).done, true, `${mode} ${setup.length} ${reply}`);
+    }
   } finally { await mcp.close(); }
 });
 
