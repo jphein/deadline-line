@@ -615,8 +615,10 @@ export class Dialog {
       const L = det?.letter_type ?? this.letter, before = t.slice(0, cands[0].start);
       const dueDate = RULES.find(r => r.id === L)?.anchor === "due" && /\bdue\s+(?:on\s+)?$/i.test(before);
       const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(before)
-          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|delivered|given(?=\s+(?:it|this|that|them|the\s+notice|a\s+copy|to\s+(?:me|us))\b))\b(?:\s+[\w']+){0,4}\s+$/i.test(before))   // "says I received this on <date>": a receipt ("given" only with an object or "to me": "I was given September 3" may be "given until")
-        || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(before);
+          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|given|delivered)\b(?:\s+[\w']+){0,4}\s+$/i.test(before))   // "says I received this on <date>": a receipt
+        || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(before)
+        // "says I was given <date>" with no object, for every letter: it may be "given until" a date to pay or move by.
+        || /\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+){0,4}?\s+given\b(?!\s+(?:it|this|that|them|(?:(?:the|a|my|this)\s+)?(?:notice|letter|papers|copy)|to\s+(?:me|us))\b)(?:\s+[\w']+){0,2}\s+$/i.test(before);
       const direct = cands.length === 1 && !statedDate && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
       return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
     }

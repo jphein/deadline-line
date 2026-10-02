@@ -1584,12 +1584,13 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
       counted(await at(setup, "They sent my notice on September 3. To me."), `${setup[0]} → to me`);
       counted(await at(setup, "They mailed it on September 3. From my landlord we got it."), `${setup[0]} → a fragment with its own subject`);   // a new subject ends the fragment
     }
-    // X35: "given" is a receipt after "says" only with an object or "to me" ("I was given September 3" may be "given
-    // until"): the check at the letters that state a later date; "given it", "given to me" stay plain, "given until" isn't counted.
-    const SUBSIDY = ["my landlord is opting out of Section 8"], REPO = ["they repossessed my car"];
-    for (const setup of [THIRTY, SIXTY_DATE, SHERIFF, WATER, POWER, RENT, SUBSIDY, REPO]) {
-      heldAt(await at(setup, "My notice says I was given September 3."), `${setup[0]} → given`);
-      for (const reply of ["it says I was given it on September 3", "the notice says it was given to me on September 3", "the notice says it was given to me September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    // X35: "given" after "says" is a receipt only with an object or "to me" ("I was given September 3" may be "given
+    // until"): the check at every letter, the 3-day too; "given it", "given to me" stay plain, "given until" isn't counted.
+    const SUBSIDY = ["my landlord is opting out of Section 8"], REPO = ["they repossessed my car"], SSA = ["Social Security denied my disability"],
+      EDD = ["I got an EDD determination"], UD = ["I got an unlawful detainer"], CIVIL = ["I got a summons for a lawsuit about money"];
+    for (const setup of [DATE, THIRTY, SIXTY_DATE, SHERIFF, WATER, POWER, RENT, SUBSIDY, REPO, SSA, EDD, UD, CIVIL]) {
+      for (const reply of ["My notice says I was given September 3.", "it says I was given on September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["it says I was given it on September 3", "the notice says it was given to me on September 3", "the notice says it was given to me September 3", "it says I was given notice on September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
       const r = await at(setup, "my notice says I was given until September 3"); assert.deepEqual([r.done, r.d.date, r.d.awaiting], [false, null, "date"], `${setup[0]} → given until`);
     }
     for (const setup of [CHECKED, HELD_30, HELD_60]) for (const reply of ["yes, I was given it then", "yes, it was given to me then"]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
