@@ -95,7 +95,11 @@ const RECIPIENT = { test: (s) => /\b(?:landlord|manager|property manager|owner|a
 // off by my husband".
 const BY_CALLER = /\bby\s+(?:me|us|(?:my|our)\s+(?:husband|wife|partner|lawyer|attorney|roommate|son|daughter|mother|father))\b/i;
 const TO_ME = /^\s+(?:(?:it|them|this|that|one|the\s+\w+(?:\s+\w+)?|a\s+\w+|my\s+\w+(?:\s+\w+)?)\s+)?(?:back\s+)?(?:(?:to|over\s+to)\s+)?(?:me|us)\b/i;
-const SENT_TO_SOMEONE = { test: (t) => t.split(/[.;!?]+|\b(?:and|but|because|so)\b/i).some(clause => {   // a comma doesn't end the search: "sent it on September 3, to my landlord"
+// A verbless fragment after a break that starts with to / by / from and a noun or pronoun ("they sent it. To my landlord.",
+// "it was mailed; by me", "sent it and to my landlord") still belongs to the clause before it.
+const FRAGMENT = { test: (c) => /^\s*(?:to|by|from)\s+(?:me|us|him|her|them|my|our|the|his|their|your|a|an)\b/i.test(c) && !/\b(?:i|we|they|he|she|you)\b/i.test(c) };
+const sendClauses = (t) => t.split(/[.;!?]+|\b(?:and|but|because|so)\b/i).reduce((out, c) => { if (out.length && FRAGMENT.test(c)) out[out.length - 1] += ` ${c}`; else out.push(c); return out; }, []);
+const SENT_TO_SOMEONE = { test: (t) => sendClauses(t).some(clause => {   // a comma doesn't end the search: "sent it on September 3, to my landlord"
   for (const m of clause.matchAll(SEND_VERB)) {
     const before = clause.slice(0, m.index), after = clause.slice(m.index + m[0].length);
     if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;   // "to me" anywhere after wins over a source: "from my landlord to me"
@@ -611,7 +615,7 @@ export class Dialog {
       const L = det?.letter_type ?? this.letter, before = t.slice(0, cands[0].start);
       const dueDate = RULES.find(r => r.id === L)?.anchor === "due" && /\bdue\s+(?:on\s+)?$/i.test(before);
       const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(before)
-          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|given|delivered)\b(?:\s+[\w']+){0,4}\s+$/i.test(before))   // "says I received this on <date>": a receipt
+          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|delivered|given(?=\s+(?:it|this|that|them|the\s+notice|a\s+copy|to\s+(?:me|us))\b))\b(?:\s+[\w']+){0,4}\s+$/i.test(before))   // "says I received this on <date>": a receipt ("given" only with an object or "to me": "I was given September 3" may be "given until")
         || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(before);
       const direct = cands.length === 1 && !statedDate && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
       return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
