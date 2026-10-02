@@ -1709,6 +1709,32 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
       for (const reply of ["it was me they handed it to on September 3", "it came to me September 3", "I got it from my landlord September 3", "the landlord served me September 3"])
         counted(await at(setup, reply), `${setup[0]} → ${reply}`);
     }
+    // X45: a pronoun right after a send verb is who it went to ("they handed him the notice", "they served her", "they
+    // gave it him"): not a plain yes at the check, end to end, and the check at the first answer; "me / us" there is a
+    // receipt. "they gave him the notice and then me" is asked again (one extra turn, the safe direction), and so is
+    // "they sent them" ("them" may be the papers).
+    const PRONOUN = ["yes, they handed him the notice", "yes, they gave her the notice", "yes, they sent them the notice", "yes, they mailed him the notice", "yes, they served him", "yes, they served her",
+      "yes, they served them", "yes, they gave him the papers", "yes, they handed her it", "yes, they gave it him", "yes, they handed them the letter", "yes, they handed him my notice"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...PRONOUN, "yes, they gave him the notice and then me", "yes, they sent them"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["yes, they handed me the notice", "yes, they gave me the notice", "yes, they served me the papers", "yes, they handed us the notice", "yes, they served me", "yes, I was served",
+        "yes, they sent them to me"]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of PRONOUN) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["they handed him the notice on September 3", "they gave her the notice September 3", "they served him September 3", "they sent them the notice September 3",
+        "it got to my landlord September 3", "it got to them September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: "got" as an arrival verb
+      for (const reply of ["they handed me the notice on September 3", "they served me September 3", "I got them September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X48: a passive send with the recipient as its subject ("my landlord was served September 3") is the check at the
+    // first answer; "I was served", "we were sent it", "it was served on me" still count.
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["my landlord was served September 3", "my landlord was mailed it September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["I was served September 3", "it was served on me September 3", "we were sent it September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
     // X39: a comma, semicolon or colon right after to / by / from doesn't hide who it went to: not a
     // plain yes at the check, end to end from the three entries, the check at the first answer; "To, me." still counts.
     const COMMA_AFTER = ["Yes, they sent it. To, my landlord.", "Yes, it was mailed. By, me.", "yes, they sent it. To, the landlord.", "yes, they sent it. To: my landlord.", "yes, it was mailed. By; me."];
