@@ -1556,6 +1556,14 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
     for (const setup of [THIRTY, SIXTY_DATE, SHERIFF, WATER, POWER, RENT]) for (const reply of ["my notice says it is September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
     for (const setup of [DATE, SIXTY_DATE, WATER, RENT]) for (const reply of ["by September 3", "pay by September 3", "I have to be out by September 3", "My notice says by September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
     for (const setup of [DATE, SIXTY_DATE, WATER, RENT]) for (const reply of ["on September 3", "it was received by me September 3", "handed to me on September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);   // "by me" is the agent
+    // X29: a comma doesn't end the recipient / agent search; X30: "to me" after a send verb wins over a source noun; X31:
+    // a receipt verb between "says" and the date is a receipt.
+    for (const setup of [DATE, SIXTY_DATE, WATER]) {
+      for (const reply of ["They sent my notice on September 3, to my landlord.", "My notice was mailed on September 3, by me.", "they sent it on September 3 to my landlord", "my notice says by September 3"]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["they sent it to me on September 3,", "They handed my notice from my landlord to me on September 3", "I got my notice from my landlord on September 3",
+        "My notice says I received this on September 3", "the notice says it was served on September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    for (const setup of [SIXTY_DATE, WATER]) heldAt(await at(setup, "my notice says September 3"), `${setup[0]} → says`);
     for (const setup of LETTERS) for (const reply of ["I got it September 3", "it was received September 3", "dated September 3"]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
     counted(await at(WATER, "my notice says it's due September 3"), "water due");
     for (const setup of [DATE, THIRTY, SIXTY_DATE, POWER, RENT]) { const r = await at(setup, "my notice says it's due September 3"); assert.equal(r.d.awaiting, "date", setup[0]); assert.doesNotMatch(r.say, /deadline was|can't end|can't shut off|If the increase/i, setup[0]); }

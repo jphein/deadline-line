@@ -93,12 +93,12 @@ const TO_SOMEONE = /\bto\s+(?:him|her|them|my|the|our|his|their|a|an)\b/i;
 const RECIPIENT = { test: (s) => /\b(?:landlord|manager|property manager|owner|agency|lender|bank|office|court|lawyer|attorney|clerk|roommate|husband|wife|son|daughter)s?\b/i.test(s) || TO_SOMEONE.test(s) };
 // "by me / us", "by my husband" after a send verb is the caller's side sending: "it was mailed by me", "it was dropped
 // off by my husband".
-const BY_CALLER = /^(?:\s+[\w']+){0,3}?\s+by\s+(?:me|us|(?:my|our)\s+(?:husband|wife|partner|lawyer|attorney|roommate|son|daughter|mother|father))\b/i;
+const BY_CALLER = /\bby\s+(?:me|us|(?:my|our)\s+(?:husband|wife|partner|lawyer|attorney|roommate|son|daughter|mother|father))\b/i;
 const TO_ME = /^\s+(?:(?:it|them|this|that|one|the\s+\w+(?:\s+\w+)?|a\s+\w+|my\s+\w+(?:\s+\w+)?)\s+)?(?:back\s+)?(?:(?:to|over\s+to)\s+)?(?:me|us)\b/i;
-const SENT_TO_SOMEONE = { test: (t) => t.split(/[,.;!?]+|\b(?:and|but|because|so)\b/i).some(clause => {
+const SENT_TO_SOMEONE = { test: (t) => t.split(/[.;!?]+|\b(?:and|but|because|so)\b/i).some(clause => {   // a comma doesn't end the search: "sent it on September 3, to my landlord"
   for (const m of clause.matchAll(SEND_VERB)) {
     const before = clause.slice(0, m.index), after = clause.slice(m.index + m[0].length);
-    if (TO_ME.test(after)) continue;
+    if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;   // "to me" anywhere after wins over a source: "from my landlord to me"
     if (BY_CALLER.test(after)) return true;
     if (PASSIVE_BEFORE.test(before) ? TO_SOMEONE.test(after) : RECIPIENT.test(after)) return true;
   }
@@ -610,7 +610,8 @@ export class Dialog {
       // date, the clock's start.)
       const L = det?.letter_type ?? this.letter, before = t.slice(0, cands[0].start);
       const dueDate = RULES.find(r => r.id === L)?.anchor === "due" && /\bdue\s+(?:on\s+)?$/i.test(before);
-      const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(before))
+      const statedDate = (SAYS_STATED_DATE.has(L) && !dueDate && /\b(?:says|say|said|reads|shows|states)(?:\s+(?!and\b|but\b|because\b|so\b)[\w']+){0,5}\s+$/i.test(before)
+          && !/\b(?:says|say|said|reads|shows|states)\b(?:\s+[\w']+)*?\s+(?:received|got|handed|served|given|delivered)\b(?:\s+[\w']+){0,4}\s+$/i.test(before))   // "says I received this on <date>": a receipt
         || /\b(?:by|before|until|till|til|no later than|not later than|on or before)\s+(?:the\s+)?$/i.test(before);
       const direct = cands.length === 1 && !statedDate && otherWords(t, cands, naming).every(allowedWord(det?.letter_type ?? this.letter));
       return { kind: direct && !SELF_SENT.test(t) ? "date" : "confirm", date };
