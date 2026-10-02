@@ -78,7 +78,7 @@ const yesRemainderOk = (words) => {
 // (Through "have / 've / had" and up to six more words, adverbs or fillers in any order ("I um actually also just mailed"): "I have sent my landlord notice", "I also just sent
 // it", "I've mailed it to the landlord"; not past another subject: "I think they sent it". Not a
 // receipt said in the passive: "I have been handed", "I was handed".)
-const SELF_SENT_FIRST = /\b(?:i|we)(?:'ve|'d)?\s+(?:(?:have|has|had)\s+)*(?:(?!was\b|were\b|got\b|been\b|am\b|are\b|have\b|has\b|had\b|they\b|he\b|she\b|it\b|you\b|someone\b|somebody\b|who\b|that\b|the\b|a\b|an\b|my\b|his\b|her\b|their\b|our\b)\w+\s+){0,6}(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed)\b/i;
+const SELF_SENT_FIRST = /\b(?:i|we)(?:'ve|'d)?\s+(?:(?:have|has|had)\s+)*(?:(?!was\b|were\b|got\b|been\b|am\b|are\b|have\b|has\b|had\b|they\b|he\b|she\b|it\b|you\b|someone\b|somebody\b|who\b|that\b|the\b|a\b|an\b|my\b|his\b|her\b|their\b|our\b)\w+\s+){0,6}(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed|served|serve)\b/i;
 // …nor said the other way round: "My landlord received notice from me on September 3", "the landlord got it from me".
 // …and in the passive: "My notice was received by my landlord on September 3".
 const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:delivered|given|handed|sent|mailed)\s+to\s+(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\b|\b(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\s+(?:received|got|was given|was handed|was sent)\b|\b(?:received|got|signed for|signed|picked up|accepted)\s+by\s+(?:my|the|our)\s+(?:landlord|manager|property manager|owner|agency|lender|bank|office)\b/i;
@@ -87,7 +87,9 @@ const SENT_BY_CALLER = /\bfrom (?:me|us)\b|\b(?:delivered|given|handed|sent|mail
 // with a recipient after it in its clause, a recipient noun or "to <someone>" (in the passive only "to <someone>": "it
 // was mailed over to the landlord", not "I was handed it by the manager"), unless that recipient is "me / us"
 // ("they also sent it to me", "the landlord then handed it to me", "they just gave me the notice").
-const SEND_VERB = /\b(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed|took|brought)\b/gi;
+const SEND_VERB = /\b(?:sent|mailed|gave|handed|returned|paid|posted|dropped|delivered|faxed|emailed|took|brought|served|serve)\b/gi;   // "served" only matters with a recipient after it: "they served my landlord"
+// Arrival verbs, for the recipient test only ("it came to my landlord", "it got to the office"; "it came to me" is a receipt).
+const ARRIVE_VERB = /\b(?:came|got|went|reached)\b/gi;
 const TO_SOMEONE = /\bto\s+(?:him|her|them|my|the|our|his|their|a|an)\b/i;
 const RECIPIENT_NOUN = "(?:landlord|manager|property manager|owner|agency|lender|bank|office|court|lawyer|attorney|clerk|roommate|husband|wife|son|daughter)s?";
 const RECIPIENT_RE = new RegExp(`\\b${RECIPIENT_NOUN}\\b`, "i");
@@ -105,15 +107,29 @@ const sendText = (t) => noFillers(t).replace(/[^\w\s']+/g, " ").replace(/\s+/g, 
 // me / us / my husband". "To me / us" anywhere after the verb wins (a receipt: "from my landlord to me", "To my landlord.
 // And to me."). An agent ("I was handed it by the landlord") isn't a recipient.
 const AGENT = new RegExp(`\\bby\\s+(?:(?:the|a|an|my|our|his|her|their|that|this)\\s+)?${RECIPIENT_NOUN}\\b`, "gi");
+// A source, not a recipient: "by the landlord", "from my landlord" (after an arrival verb, and in a yes at the check).
+const SOURCE = new RegExp(`\\b(?:by|from)\\s+(?:(?:the|a|an|my|our|his|her|their|that|this)\\s+)?${RECIPIENT_NOUN}\\b`, "gi");
 const TO_ANYONE = /\b(?:to|for)\s+(?:him|her|them|someone|somebody|everyone)\b/i;
+// …or named before it as a to / for phrase ("yes, to my landlord they sent it", "for my landlord they mailed it"); never a
+// bare noun ("the landlord mailed it", "I was handed it by the landlord" stay receipts).
+const TO_SOMEONE_BEFORE = new RegExp(`\\b(?:to|for)\\s+(?:(?:my|our|the|his|her|their|a|an|that|this)\\s+)?(?:${RECIPIENT_NOUN}|him|her|them|someone|somebody|everyone)\\b`, "i");
 const SENT_TO_SOMEONE = { test: (u) => {
-  for (const m of u.matchAll(SEND_VERB)) {
-    const after = u.slice(m.index + m[0].length);
+  for (const m of [...u.matchAll(SEND_VERB), ...u.matchAll(ARRIVE_VERB)]) {
+    const after = u.slice(m.index + m[0].length), arrived = /^(?:came|got|went|reached)$/i.test(m[0]);
     if (TO_ME.test(after) || /\bto\s+(?:me|us)\b/i.test(after)) continue;
-    if (BY_CALLER.test(after)) return true;
-    if (RECIPIENT.test(after.replace(AGENT, " ")) || TO_ANYONE.test(after)) return true;
+    if (BY_CALLER.test(after) || TO_SOMEONE_BEFORE.test(u.slice(0, m.index))) return true;
+    // A cleft with the "to" stranded ("it was my landlord they sent it to", "... sent it to on September 3"): the recipient came first.
+    if (/\b(?:to|for)\s*(?:$|(?:on|in|at|last|this|yesterday|today)\b)/i.test(after) && (RECIPIENT_RE.test(u.slice(0, m.index)) || /\b(?:him|her|them)\b/i.test(u.slice(0, m.index)))) return true;
+    if (RECIPIENT.test(after.replace(arrived ? SOURCE : AGENT, " ")) || TO_ANYONE.test(after)) return true;
   }
   return false;
+} };
+// At the check, a yes whose remainder names a recipient (a source "by / from <noun>" aside) isn't a plain yes unless the
+// notice came to the caller ("to me / us"): "yes, it came to my landlord", "yes, it was served on my landlord".
+const NAMES_RECIPIENT = { test: (words) => {
+  const u = words.join(" ");
+  if (!RECIPIENT_RE.test(u.replace(SOURCE, " "))) return false;
+  return !(/\bto\s+(?:me|us)\b/i.test(u) || [...u.matchAll(SEND_VERB)].some(m => TO_ME.test(u.slice(m.index + m[0].length))));
 } };
 const SELF_SENT = { test: (t) => { const u = sendText(t); return SELF_SENT_FIRST.test(u) || SENT_BY_CALLER.test(u) || SENT_TO_SOMEONE.test(u); } };
 const BARE_WORDS = new Set(["um", "uh", "so", "well", "actually", "okay", "ok", "oh", "it", "its", "it's", "was", "is", "on"]);
@@ -311,7 +327,7 @@ export class Dialog {
       const said = dateCandidates(t);
       // A yes that says the held date again and nothing else ("yes, it was September 3") is a plain yes.
       const restated = said.length > 0 && said.every(c => !c.hard && !c.soft && sameDay(this.date, c))
-        && !SELF_SENT.test(t) && yesRemainderOk(otherWords(t, said));
+        && !SELF_SENT.test(t) && yesRemainderOk(otherWords(t, said)) && !NAMES_RECIPIENT.test(otherWords(t, said));
       const newDay = (said.length > 0 && !restated) || RELATIVE.test(t);
       this.held = this.date;   // the date that was held, for a chatty restatement of it (asked once, then the date again)
       // A stay request and nothing else ("please don't hang up"): the check again, the date still held.
@@ -322,7 +338,8 @@ export class Dialog {
         // A letter named with the yes: its words are the letter's; the rest must still be a plain yes.
         const ids = named ? await this.namedIds(t) : [];
         // (Never the caller's own sending: "Yes, I mailed it to my landlord" isn't a plain yes.)
-        if (!SELF_SENT.test(t) && yesRemainderOk(otherWords(t, said, ids.length ? ids : null, false, true))) { if (named) this.addCarry(ids); return this.answer(t); }
+        const rest = otherWords(t, said, ids.length ? ids : null, false, true);
+        if (!SELF_SENT.test(t) && yesRemainderOk(rest) && !NAMES_RECIPIENT.test(rest)) { if (named) this.addCarry(ids); return this.answer(t); }
         // Not a plain yes, with a letter named ("Yes, that is the due date. I also got a 30 day notice."): the date is
         // asked again and the letter carried.
         if (named) { this.date = null; this.addCarry(ids); this.dateNo = true; return this.say(`Okay. ${this.dateQuestion ?? ASK_DATE}`); }

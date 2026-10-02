@@ -1663,6 +1663,52 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
         "They sent my notice on September 3. It was to my landlord.", "My notice was mailed on September 3. By, me."]) heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
       for (const reply of ["They sent it on September 3. To me.", "They sent it on September 3. To, me."]) counted(await at(setup, reply), `${setup[0]} → ${reply}`);
     }
+    // X41: a recipient named before the send verb (a to / for phrase, or a cleft with the "to" stranded: "it was my
+    // landlord they sent it to"), or served by it ("they served my landlord"), is still a recipient: not a plain yes at the
+    // check, end to end, and the check at the first answer; a bare noun before the verb ("the landlord mailed it") isn't one,
+    // and "they served me", "I was served" stay receipts.
+    const BEFORE_VERB = ["yes, to my landlord they sent it", "yes, for my landlord they mailed it", "yes, it was my landlord they sent it to", "yes, they served my landlord", "yes, they served it to my landlord"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of [...BEFORE_VERB, "yes, to the manager it was sent", "yes, it was the manager they mailed it to", "yes, they sent it to my landlord's house",
+        "yes, they forwarded it to my landlord", "yes, they sent it to my landlord. A different notice was sent to me."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: the whitelist's, pinned so they stay
+      // Two events, a yes plus a receipt, the same reading as "To my landlord. And to me.": counts.
+      for (const reply of ["yes, they sent it to my landlord and they gave it to me", "yes, they sent it to my landlord and my landlord gave it to me", "yes, they served me", "yes, I was served",
+        "yes, it was me they sent it to"]) assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of BEFORE_VERB) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["To my landlord they sent it on September 3", "For my landlord they mailed it September 3", "They served my landlord on September 3", "It was my landlord they sent it to on September 3"])
+        heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["the landlord mailed it September 3", "I was handed it by the landlord September 3", "it was served on me September 3", "they served me September 3", "I was served by the landlord September 3"])
+        counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
+    // X45 / X46: at the check, a yes whose remainder names a recipient (a source "by / from <noun>" aside) is not plain
+    // unless the notice came to the caller ("to me / us"): arrival and serving at someone ("it came to my landlord", "it
+    // was served on my landlord", "I served my landlord") are asked again, at the check, end to end, and at the first answer.
+    const NAMED = ["yes, it came to my landlord", "yes, it got to my landlord", "yes, it was served on my landlord", "yes, I served my landlord", "yes, I served it on the landlord",
+      "yes, they served it to my landlord", "yes, my landlord they sent it to"];
+    for (const setup of [CHECKED, HELD_30, HELD_60]) {
+      for (const reply of NAMED) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      // Accepted extra turns: a recipient named with no "to me" ("my landlord sent it" may be the caller's own notice).
+      for (const reply of ["yes, my landlord sent it", "yes, the landlord did", "yes, I also just actually well sent it"]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
+      // A yes plus a receipt ("to me" later in the turn): counts; if wrong it errs early, the safe direction.
+      for (const reply of ["yes, the landlord handed it to me", "yes, my landlord sent it to me", "yes, I got it from my landlord", "yes, I was handed it by the landlord", "yes, it was sent to me and to my landlord",
+        "yes, they sent it to my landlord. Then they sent it to me.", "yes, they sent it to my landlord. It was sent to me.", "yes, it was me they handed it to", "yes, to me they sent it"])
+        assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
+    }
+    for (const entry of ["no thanks, it wasn't September 3", "September 3, thanks", "no thanks, I paid on September 3"]) for (const reply of NAMED) {
+      const d = new Dialog(mcp.callTool, { today: "2026-09-30" }); await d.handle("I got a 3 day notice"); await d.handle(entry);
+      const r = await d.handle(reply); assert.doesNotMatch(r.say, /deadline/i, `${entry} → ${reply}`); assert.equal(d.date, null, `${entry} → ${reply}`);
+    }
+    for (const setup of [DATE, STOP, THIRTY, SIXTY]) {
+      for (const reply of ["I served my landlord September 3", "it was served on my landlord September 3", "it came to my landlord September 3", "we also just actually also sent it September 3", "I served it September 3"])
+        heldAt(await at(setup, reply), `${setup[0]} → ${reply}`);
+      for (const reply of ["it was me they handed it to on September 3", "it came to me September 3", "I got it from my landlord September 3", "the landlord served me September 3"])
+        counted(await at(setup, reply), `${setup[0]} → ${reply}`);
+    }
     // X39: a comma, semicolon or colon right after to / by / from doesn't hide who it went to: not a
     // plain yes at the check, end to end from the three entries, the check at the first answer; "To, me." still counts.
     const COMMA_AFTER = ["Yes, they sent it. To, my landlord.", "Yes, it was mailed. By, me.", "yes, they sent it. To, the landlord.", "yes, they sent it. To: my landlord.", "yes, it was mailed. By; me."];
