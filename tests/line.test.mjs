@@ -1645,12 +1645,12 @@ test("dialog: a date said with a negation, a hedge, thanks or a goodbye is read 
       "yes, they sent it. It was to my landlord.", "yes, they sent it. It's to my landlord.", "yes, they sent it. That was to my landlord.", "yes, they sent it. That's to my landlord.",
       "yes, it was sent. It was to the landlord.", "yes, it was sent. It was to him.", "yes, it was sent. It was for my landlord.", "yes, they mailed it. It was by me.", "yes, it was mailed. It was by me.",
       "yes, they sent it. Plus to my landlord.", "yes, they sent it. Um, so, to my landlord.", "yes, they sent it. So, then to my landlord.", "yes, they sent it. Um, so, then to my landlord.",
-      "yes, they sent it. Well, also, just, then to my landlord.", "yes, they sent it. For them."];
+      "yes, they sent it. Well, also, just, then to my landlord.", "yes, they sent it. For them.", "yes, they sent it. They said to my landlord."];
     for (const setup of [CHECKED, HELD_30, HELD_60]) {
       for (const reply of [...WINDOW, "Yes, they sent it. Exclusively to my landlord.", "Yes, they sent it. To my other landlord."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);   // the last two: the whitelist's, pinned so they stay
       // Accepted extra turns: a recipient after the verb in another clause.
       for (const reply of ["yes, they mailed it. I got it from my landlord on the 3rd.", "yes. They sent it to my landlord."]) asked(await at(setup, reply), `${setup[0]} → ${reply}`);
-      for (const reply of ["yes. They handed it to me.", "yes, they sent it. Right to me.", "yes, they sent it. Over to me."])
+      for (const reply of ["yes. They handed it to me.", "yes, they sent it. Right to me.", "yes, they sent it. Over to me.", "yes, my landlord gave it to me", "yes, it came. From my landlord."])   // "came" isn't a send verb
         assert.match((await at(setup, reply)).say, PLAIN, `${setup[0]} → ${reply}`);
       assert.match((await at(setup, "yes, they sent it. To my landlord. And to me.")).say, PLAIN, `${setup[0]} → and to me`);   // deliberate: "to me" anywhere after the verb wins
     }
