@@ -9,3 +9,13 @@
   removal: `scratch/asterisk-container-backup-20261117/` on familiar (gitignored: `inspect.json` and `volumes.tgz`
   with its six anonymous volumes, image-default config, rehearsal logs and spool). The image (Asterisk 22.10.1)
   was left in place.
+
+- **2026-11-17 08:5x, luna-deadlines (Sen's align request):** the synced tree on familiar (`~/Projects/deadline-line`)
+  was NOT aligned and its `main` was not re-pointed. Local `main` is a separate history from `public` (no merge base):
+  `f08f078` (feat: Deadline Line, 2026-09-27) and `688aec9` (docs: web demo screenshot, 2026-09-27), the pre-publish
+  originals of what `public` re-rooted as `59319fc`. Its tracking ref `origin/main` is stale (the remote has no `main`).
+  Tree hashes differ (`main` f3426c6, `public` a181ef6). The one file that exists ONLY on local `main` is
+  `docs/EXCHANGE-INTEGRATION.md`; `docs/web-demo.png` is already on `public`. Refs were saved to
+  `scratch/asterisk-container-backup-20261117/refs-before-align.txt` first. Before anyone aligns the tree to `public`,
+  decide whether `docs/EXCHANGE-INTEGRATION.md` belongs on `public` (read it for anything private first) or is kept on
+  a `backup/` branch pushed to the remote.
