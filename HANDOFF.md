@@ -19,3 +19,11 @@
   `scratch/asterisk-container-backup-20261117/refs-before-align.txt` first. Before anyone aligns the tree to `public`,
   decide whether `docs/EXCHANGE-INTEGRATION.md` belongs on `public` (read it for anything private first) or is kept on
   a `backup/` branch pushed to the remote.
+
+- **2026-11-17 09:0x, luna-deadlines (Sen's "go"):** the synced tree's `main` now tracks `public`. Familiar: with
+  `git status --porcelain` empty, ran `SYNCED_TREE_OK=1 git switch -C main origin/public`, set `main`'s upstream to
+  `origin/public` and `git remote set-head origin public`. The old local `main` was `688aec9` (parent `f08f078`), kept
+  as the local branch `archive/main-pre-public` on familiar and as a verified bundle in
+  `scratch/archive-main-pre-public/` (gitignored, synced), with a copy of `docs/EXCHANGE-INTEGRATION.md`. That doc was
+  dropped on purpose at the 9/27 re-root: it describes the house PBX and its live number, and this repo is public. It
+  must not be cherry-picked here. katana's `.git` gets the same ref move (no file changes) once Syncthing settles.
